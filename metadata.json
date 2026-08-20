@@ -1,0 +1,6 @@
+{
+  "name": "X ARENA",
+  "description": "Premium competitive gaming platform for Chess and 2048 featuring Human vs Human, Human vs AI, Ranked competition, Events, AI coaching, and Web3 tournament settlement on X Layer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
