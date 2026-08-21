@@ -1,0 +1,39 @@
+{
+  "rules": {
+    "users": {
+      "$userId": {
+        "read": "true",
+        "write": "true",
+        "description": "User profiles indexed by wallet address or auth ID"
+      }
+    },
+    "events": {
+      "$eventId": {
+        "read": "true",
+        "write": "true",
+        "description": "Arena tournaments and escrow events"
+      }
+    },
+    "matches": {
+      "$matchId": {
+        "read": "true",
+        "write": "true",
+        "description": "Match history and on-chain records"
+      }
+    },
+    "challenges": {
+      "$challengeId": {
+        "read": "true",
+        "write": "true",
+        "description": "Daily quest challenges"
+      }
+    },
+    "leaderboard": {
+      "$entry": {
+        "read": "true",
+        "write": "true",
+        "description": "Global leaderboard standings"
+      }
+    }
+  }
+}

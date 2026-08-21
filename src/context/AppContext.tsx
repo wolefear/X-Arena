@@ -24,6 +24,17 @@ import {
 import { sound } from '../utils/audio';
 import { getChessTier } from '../utils/elo';
 import { fetchOnChainBalances } from '../utils/web3OnChain';
+import { connectInjectedWeb3Wallet } from '../utils/walletConnector';
+import {
+  subscribeLiveEvents,
+  saveLiveEvent,
+  saveMatchRecord as saveFirestoreMatchRecord,
+  subscribeUserMatches,
+  saveUserProfile,
+  fetchUserProfile,
+  subscribeLeaderboard,
+  updateLeaderboardScore,
+} from '../lib/firestoreService';
 
 export const OWNER_ADMIN_WALLET = '0xeDf63F61FfD9B8dABEb1179F3Cd4D2968C6003Be';
 
@@ -161,6 +172,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       user.walletAddress.trim().toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase()
   );
 
+  // Real-time Firestore synchronization for Events
+  useEffect(() => {
+    const unsubscribe = subscribeLiveEvents((liveEvents) => {
+      // If Firestore contains created events, use them seamlessly
+      if (liveEvents && liveEvents.length > 0) {
+        setEvents(liveEvents);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Firestore synchronization for Leaderboard
+  useEffect(() => {
+    const unsubscribe = subscribeLeaderboard((liveLeaderboard) => {
+      if (liveLeaderboard && liveLeaderboard.length > 0) {
+        setLeaderboard(liveLeaderboard);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Firestore synchronization for User Match History
+  useEffect(() => {
+    if (!user.walletAddress) return;
+    const unsubscribe = subscribeUserMatches(user.walletAddress, (records) => {
+      if (records && records.length > 0) {
+        setMatchHistory(records);
+      }
+    });
+    return () => unsubscribe();
+  }, [user.walletAddress]);
+
   // Sync and persist user session state
   useEffect(() => {
     // Keep user.isAdmin strictly synchronized with owner wallet check
@@ -169,6 +212,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     localStorage.setItem('xarena_user', JSON.stringify({ ...user, isAdmin: isOwnerAdmin }));
     localStorage.setItem('xarena_connected', isConnected ? 'true' : 'false');
+    
+    // Save to Firestore when connected
+    if (isConnected && user.walletAddress) {
+      saveUserProfile({ ...user, isAdmin: isOwnerAdmin });
+    }
   }, [user, isConnected, isOwnerAdmin]);
 
   // Real on-chain balance synchronization hook
@@ -216,6 +264,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Safe Web3 Connection with MetaMask, OKX, WalletConnect & Owner Fast-Connect
   const connectWallet = async (walletName: string, customAddress?: string) => {
     try {
+      // 1. If explicit custom address provided
       if (customAddress) {
         const isOwner = customAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
         let onChainOkb = isOwner ? 25.0 : 0.0;
@@ -231,14 +280,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.warn('Initial custom balance fetch', e);
         }
 
+        // Try load existing Firestore profile
+        const existingProfile = await fetchUserProfile(customAddress);
+
         setUser((prev) => ({
           ...prev,
+          ...(existingProfile || {}),
           walletAddress: customAddress,
           isAdmin: isOwner,
-          username: isOwner ? 'X Arena Deployer (Admin)' : prev.username === 'Arena Contender' ? 'zkEVM Contender' : prev.username,
+          username: existingProfile?.username || (isOwner ? 'X Arena Deployer (Admin)' : prev.username === 'Arena Contender' ? 'zkEVM Contender' : prev.username),
           balanceOkb: onChainOkb > 0 ? onChainOkb : isOwner ? 25.0 : 0.0,
           balanceUsdc: onChainUsdc > 0 ? onChainUsdc : isOwner ? 1000.0 : 0.0,
-          globalRank: isOwner ? 1 : prev.globalRank || 84,
+          globalRank: isOwner ? 1 : existingProfile?.globalRank || prev.globalRank || 84,
         }));
         setIsConnected(true);
         setIsWalletModalOpen(false);
@@ -251,80 +304,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // Try browser injected provider with error shield
-      if (
-        typeof window !== 'undefined' &&
-        (window as any).ethereum &&
-        (walletName.toLowerCase().includes('metamask') || walletName.toLowerCase().includes('okx'))
-      ) {
-        try {
-          const eth = (window as any).ethereum;
-          const accounts = await eth.request({ method: 'eth_requestAccounts' });
-          if (accounts && accounts[0]) {
-            const realAddr = accounts[0];
-            const isOwner = realAddr.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
-            const displayAddr = `${realAddr.slice(0, 6)}...${realAddr.slice(-4)}`;
-            
-            let onChainOkb = 0;
-            let onChainUsdc = 0;
-            try {
-              const onChain = await fetchOnChainBalances(realAddr);
-              onChainOkb = onChain.okb;
-              onChainUsdc = onChain.usdc;
-            } catch (e) {
-              console.log('Balance fetch fallback', e);
-            }
+      // 2. Real Browser Web3 Injected Provider Connection (OKX / MetaMask / Injected)
+      const providerType = walletName.toLowerCase().includes('okx')
+        ? 'okx'
+        : walletName.toLowerCase().includes('metamask')
+        ? 'metamask'
+        : 'any';
 
-            setUser((prev) => ({
-              ...prev,
-              walletAddress: realAddr,
-              isAdmin: isOwner,
-              balanceOkb: onChainOkb,
-              balanceUsdc: onChainUsdc,
-              globalRank: isOwner ? 1 : prev.globalRank || 42,
-            }));
-            setIsConnected(true);
-            setIsWalletModalOpen(false);
-            showToast(
-              isOwner
-                ? `Owner Wallet Verified: ${displayAddr} (Admin Enabled)`
-                : `Connected: ${displayAddr} on X Layer zkEVM!`,
-              'success'
-            );
-            return;
-          }
-        } catch (ethErr: any) {
-          console.warn('Injected provider error handled gracefully:', ethErr);
-          // Fall through to fallback connection below
+      const realAddr = await connectInjectedWeb3Wallet(providerType);
+      if (realAddr) {
+        const isOwner = realAddr.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
+        const displayAddr = `${realAddr.slice(0, 6)}...${realAddr.slice(-4)}`;
+
+        let onChainOkb = 0;
+        let onChainUsdc = 0;
+        try {
+          const onChain = await fetchOnChainBalances(realAddr);
+          onChainOkb = onChain.okb;
+          onChainUsdc = onChain.usdc;
+        } catch (e) {
+          console.log('Real balance fetch', e);
         }
+
+        // Load existing Firestore profile if previously registered
+        const existingProfile = await fetchUserProfile(realAddr);
+
+        setUser((prev) => ({
+          ...prev,
+          ...(existingProfile || {}),
+          walletAddress: realAddr,
+          isAdmin: isOwner,
+          balanceOkb: onChainOkb,
+          balanceUsdc: onChainUsdc,
+          globalRank: isOwner ? 1 : existingProfile?.globalRank || prev.globalRank || 42,
+        }));
+        setIsConnected(true);
+        setIsWalletModalOpen(false);
+        showToast(
+          isOwner
+            ? `Owner Wallet Verified: ${displayAddr} (Admin Enabled)`
+            : `Connected: ${displayAddr} on X Layer zkEVM!`,
+          'success'
+        );
+        return;
       }
     } catch (err: any) {
       console.warn('Web3 connection notice:', err);
+      showToast(err?.message || 'Wallet connection was cancelled or rejected.', 'error');
     }
-
-    // Direct Web3 connection fallback (e.g. WalletConnect / Sandbox)
-    const generatedAddr = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
-    const targetAddr = user.walletAddress && user.walletAddress.startsWith('0x') ? user.walletAddress : generatedAddr;
-    let initialOkb = 0;
-    let initialUsdc = 0;
-    try {
-      const onChain = await fetchOnChainBalances(targetAddr);
-      initialOkb = onChain.okb;
-      initialUsdc = onChain.usdc;
-    } catch (e) {
-      console.log('Fallback balance fetch', e);
-    }
-
-    setUser((prev) => ({
-      ...prev,
-      walletAddress: targetAddr,
-      balanceOkb: initialOkb,
-      balanceUsdc: initialUsdc,
-      globalRank: prev.globalRank || 120,
-    }));
-    setIsConnected(true);
-    setIsWalletModalOpen(false);
-    showToast(`Connected via ${walletName} on X Layer (zkEVM Escrow Active)`, 'success');
   };
 
   const disconnectWallet = () => {
@@ -486,10 +513,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newRecord: MatchRecord = {
       ...record,
       id: `match_${Date.now()}`,
-      date: 'Just now',
+      date: new Date().toISOString(),
     };
 
     setMatchHistory((prev) => [newRecord, ...prev]);
+
+    // Persist match directly to Firestore
+    if (user.walletAddress) {
+      saveFirestoreMatchRecord(newRecord, user.walletAddress);
+    }
 
     // Update user stats & ratings
     setUser((prev) => {
@@ -578,29 +610,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Add to participants
+    const updatedEvent: ArenaEvent = {
+      ...targetEvent,
+      currentParticipantsCount: targetEvent.currentParticipantsCount + 1,
+      participants: [
+        ...targetEvent.participants,
+        {
+          userId: user.id,
+          username: user.username,
+          avatar: user.avatar,
+          walletAddress: user.walletAddress,
+          score: 0,
+          rank: targetEvent.participants.length + 1,
+          joinedAt: new Date().toISOString(),
+        },
+      ],
+    };
+
     setEvents((prev) =>
-      prev.map((ev) => {
-        if (ev.id === eventId) {
-          return {
-            ...ev,
-            currentParticipantsCount: ev.currentParticipantsCount + 1,
-            participants: [
-              ...ev.participants,
-              {
-                userId: user.id,
-                username: user.username,
-                avatar: user.avatar,
-                walletAddress: user.walletAddress,
-                score: 0,
-                rank: ev.participants.length + 1,
-                joinedAt: new Date().toISOString(),
-              },
-            ],
-          };
-        }
-        return ev;
-      })
+      prev.map((ev) => (ev.id === eventId ? updatedEvent : ev))
     );
+
+    saveLiveEvent(updatedEvent).catch((err) => {
+      console.warn('Firestore update event on join error:', err);
+    });
 
     showToast(`Successfully registered for ${targetEvent.title}! Entry confirmed on X Layer.`, 'success');
     sound.playVictory();
@@ -683,6 +716,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setEvents((prev) => [fullEvent, ...prev]);
+    // Save live event to Firestore
+    saveLiveEvent(fullEvent).catch((err) => {
+      console.warn('Firestore event save error:', err);
+    });
     showToast(`Created event "${fullEvent.title}" on X Layer!`, 'success');
     sound.playVictory();
   };

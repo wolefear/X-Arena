@@ -12,8 +12,10 @@ import {
   AlertTriangle,
   TrendingUp,
   DollarSign,
+  Trash2,
 } from 'lucide-react';
 import { sound } from '../../utils/audio';
+import { saveLiveEvent, deleteLiveEvent } from '../../lib/firestoreService';
 
 export const AdminDashboardView: React.FC = () => {
   const { user, events, setEvents, aiAgents, setAiAgents, showToast } = useApp();
@@ -81,6 +83,10 @@ export const AdminDashboardView: React.FC = () => {
     };
 
     setEvents((prev) => [created, ...prev]);
+    // Save to Firestore
+    saveLiveEvent(created as any).catch((err) => {
+      console.warn('Firestore live event save error:', err);
+    });
     showToast(`Tournament "${created.title}" deployed to X Layer smart escrow!`, 'success');
 
     // Reset form
@@ -342,9 +348,23 @@ export const AdminDashboardView: React.FC = () => {
                       {evt.game.toUpperCase()} • {evt.currentParticipantsCount}/{evt.maxParticipants} Players
                     </span>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[#CCFF00] font-black text-sm block">${evt.prizePoolUsdc} USDC</span>
-                    <span className="text-[10px] text-white/50">ESCROW LOCKED</span>
+                  <div className="flex items-center space-x-3">
+                    <div className="text-right">
+                      <span className="text-[#CCFF00] font-black text-sm block">${evt.prizePoolUsdc} USDC</span>
+                      <span className="text-[10px] text-white/50">ESCROW LOCKED</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        sound.playClick();
+                        setEvents((prev) => prev.filter((e) => e.id !== evt.id));
+                        deleteLiveEvent(evt.id).catch((err) => console.warn(err));
+                        showToast(`Removed event "${evt.title}"`, 'info');
+                      }}
+                      className="p-2 text-white/30 hover:text-red-400 hover:bg-red-950/20 border border-transparent hover:border-red-500/30 transition"
+                      title="Delete Tournament"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ))}
