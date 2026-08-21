@@ -12,9 +12,11 @@ export interface UserProfile {
   title: string;
   bio: string;
   joinedDate: string;
+  balanceUsdt: number;
   balanceUsdc: number;
   balanceOkb: number;
   totalPrizesWonUsdc: number;
+  totalPrizesWonUsdt?: number;
   globalRank: number;
   chessRating: number;
   chessPeakRating: number;

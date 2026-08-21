@@ -11,9 +11,11 @@ export interface OkbMarketPrice {
 
 export interface OnChainBalances {
   okb: number;
+  usdt: number;
   usdc: number;
   isLive: boolean;
   networkName: string;
+  chainId?: number;
 }
 
 // X Layer Mainnet RPC endpoints
@@ -22,8 +24,11 @@ const XLAYER_MAINNET_RPCS = [
   'https://xlayerrpc.okx.com',
 ];
 
-// USDC token on X Layer Mainnet (Bridged USDC)
-const XLAYER_USDC_CONTRACT = '0xA8CE8aee21bC2A48a5EF670afCc9274C7bbbC035';
+// Tether USD (USDT) on X Layer Mainnet (6 decimals)
+export const XLAYER_USDT_CONTRACT = '0x1e4a5963abfd975d8c9021ce480b42188849d41d';
+
+// USDC token on X Layer Mainnet (Bridged USDC, 6 decimals)
+export const XLAYER_USDC_CONTRACT = '0xA8CE8aee21bC2A48a5EF670afCc9274C7bbbC035';
 
 let cachedPrice: OkbMarketPrice = {
   priceUsd: 105.65,
@@ -191,39 +196,58 @@ export async function fetchLiveOkbPrice(force = false): Promise<OkbMarketPrice> 
 }
 
 /**
- * Fetch verified on-chain native OKB and USDC balance for any EVM wallet address on X Layer
+ * Fetch verified on-chain native OKB, USDT, and USDC balances for any EVM wallet address on X Layer
  */
 export async function fetchOnChainBalances(address: string): Promise<OnChainBalances> {
   if (!address || !address.startsWith('0x') || address.length !== 42) {
-    return { okb: 0, usdc: 0, isLive: false, networkName: 'X Layer' };
+    return { okb: 0, usdt: 0, usdc: 0, isLive: false, networkName: 'X Layer (zkEVM L2)' };
   }
 
   let nativeOkb = 0;
+  let tokenUsdt = 0;
   let tokenUsdc = 0;
   let isLive = false;
+  let detectedChainId: number | undefined = undefined;
+  let networkName = 'X Layer (zkEVM L2)';
 
-  // 1. If window.ethereum is connected and matching address, query directly from injected provider
+  // 1. If injected wallet is connected, detect chain & attempt direct provider call
   if (typeof window !== 'undefined' && (window as any).ethereum) {
     try {
       const eth = (window as any).ethereum;
+      const chainHex = await eth.request({ method: 'eth_chainId' }).catch(() => null);
+      if (chainHex) {
+        detectedChainId = parseInt(chainHex, 16);
+        if (detectedChainId === 196) {
+          networkName = 'X Layer Mainnet';
+        } else if (detectedChainId === 195) {
+          networkName = 'X Layer Testnet';
+        } else if (detectedChainId === 1) {
+          networkName = 'Ethereum Mainnet';
+        }
+      }
+
       const rawBal = await eth.request({
         method: 'eth_getBalance',
         params: [address, 'latest'],
-      });
+      }).catch(() => null);
+
       if (rawBal) {
         const wei = BigInt(rawBal);
         nativeOkb = Number(wei) / 1e18;
         isLive = true;
       }
     } catch (e) {
-      console.log('Injected eth_getBalance skipped, querying RPC directly', e);
+      console.log('Injected eth_getBalance skipped, querying X Layer RPCs directly', e);
     }
   }
 
-  // 2. Direct Query to X Layer Mainnet JSON-RPC node
+  // 2. Direct Query to X Layer Mainnet JSON-RPC node for high reliability
+  const cleanAddr = address.replace(/^0x/i, '').padStart(64, '0');
+  const erc20BalanceCallData = `0x70a08231${cleanAddr}`;
+
   for (const rpc of XLAYER_MAINNET_RPCS) {
     try {
-      // Query Native OKB balance
+      // Query Native OKB balance via RPC
       const okbRes = await fetch(rpc, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -244,11 +268,8 @@ export async function fetchOnChainBalances(address: string): Promise<OnChainBala
         }
       }
 
-      // Query USDC Token Balance (ERC-20 balanceOf: 0x70a08231)
-      const cleanAddr = address.replace(/^0x/i, '').padStart(64, '0');
-      const usdcCallData = `0x70a08231${cleanAddr}`;
-
-      const usdcRes = await fetch(rpc, {
+      // Query USDT Token Balance (ERC-20 balanceOf: 6 decimals)
+      const usdtRes = await fetch(rpc, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -257,8 +278,34 @@ export async function fetchOnChainBalances(address: string): Promise<OnChainBala
           method: 'eth_call',
           params: [
             {
+              to: XLAYER_USDT_CONTRACT,
+              data: erc20BalanceCallData,
+            },
+            'latest',
+          ],
+        }),
+      });
+
+      if (usdtRes.ok) {
+        const usdtData = await usdtRes.json();
+        if (usdtData?.result && usdtData.result !== '0x' && usdtData.result !== '0x0') {
+          const rawUsdt = BigInt(usdtData.result);
+          tokenUsdt = Number(rawUsdt) / 1e6;
+        }
+      }
+
+      // Query USDC Token Balance (ERC-20 balanceOf: 6 decimals)
+      const usdcRes = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'eth_call',
+          params: [
+            {
               to: XLAYER_USDC_CONTRACT,
-              data: usdcCallData,
+              data: erc20BalanceCallData,
             },
             'latest',
           ],
@@ -267,23 +314,24 @@ export async function fetchOnChainBalances(address: string): Promise<OnChainBala
 
       if (usdcRes.ok) {
         const usdcData = await usdcRes.json();
-        if (usdcData?.result && usdcData.result !== '0x') {
+        if (usdcData?.result && usdcData.result !== '0x' && usdcData.result !== '0x0') {
           const rawUsdc = BigInt(usdcData.result);
-          // USDC has 6 decimals on X Layer
           tokenUsdc = Number(rawUsdc) / 1e6;
         }
       }
 
       if (isLive) break; // successfully obtained on-chain response
     } catch (rpcErr) {
-      console.warn(`RPC ${rpc} query failed, trying next`, rpcErr);
+      console.warn(`RPC ${rpc} query failed, trying fallback`, rpcErr);
     }
   }
 
   return {
     okb: Number(nativeOkb.toFixed(4)),
+    usdt: Number(tokenUsdt.toFixed(2)),
     usdc: Number(tokenUsdc.toFixed(2)),
     isLive,
-    networkName: 'X Layer (zkEVM L2)',
+    networkName,
+    chainId: detectedChainId,
   };
 }

@@ -199,6 +199,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time Firestore synchronization for ALL Users in Central Database
   useEffect(() => {
+    // Run once on load to ensure old test statistics are sanitized if needed
+    const resetKey = 'xarena_v3_fresh_reset_executed';
+    if (!localStorage.getItem(resetKey)) {
+      localStorage.setItem(resetKey, 'true');
+      setUser((prev) => ({
+        ...prev,
+        chessRating: 0,
+        chessPeakRating: 0,
+        chessTier: 'Bronze',
+        chessStats: { wins: 0, losses: 0, draws: 0, streak: 0 },
+        score2048Rating: 0,
+        score2048PeakRating: 0,
+        bestScore2048: 0,
+        tier2048: 'Bronze',
+        stats2048: { gamesPlayed: 0, wins2048: 0, highestTile: 0, streak: 0 },
+        totalPrizesWonUsdc: 0,
+        totalPrizesWonUsdt: 0,
+        achievements: [],
+      }));
+    }
+
     const unsubscribe = subscribeAllUsers((usersList) => {
       setAllUsers(usersList || []);
     });
@@ -217,14 +238,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         username: u.username || 'Contender',
         avatar: u.avatar || generateRandomAvatar(u.walletAddress),
         walletAddress: u.walletAddress,
-        rating: u.chessRating || 1200,
+        rating: typeof u.chessRating === 'number' ? u.chessRating : 0,
         wins: u.chessStats?.wins || 0,
         losses: u.chessStats?.losses || 0,
         winRate: chessWinRate,
         tier: u.chessTier || 'Bronze',
         bestScore: u.bestScore2048 || 0,
         highestTile: u.stats2048?.highestTile || 0,
-        prizesWonUsdc: u.totalPrizesWonUsdc || u.balanceUsdc || 0,
+        prizesWonUsdc: u.totalPrizesWonUsdc || 0,
       };
     });
   }, [allUsers]);
@@ -266,7 +287,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setUser((prev) => ({
             ...prev,
             balanceOkb: onChain.okb,
-            balanceUsdc: onChain.usdc > 0 ? onChain.usdc : prev.balanceUsdc,
+            balanceUsdt: onChain.usdt,
+            balanceUsdc: onChain.usdc,
           }));
         }
       } catch (err) {
@@ -275,7 +297,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     syncBalances();
-    const interval = setInterval(syncBalances, 25000);
+    const interval = setInterval(syncBalances, 20000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -304,11 +326,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let resolvedAddress = customAddress;
 
       if (!resolvedAddress) {
-        const providerType = walletName.toLowerCase().includes('okx')
+        const providerType: 'okx' | 'metamask' | 'walletconnect' = walletName.toLowerCase().includes('okx')
           ? 'okx'
           : walletName.toLowerCase().includes('metamask')
           ? 'metamask'
-          : 'any';
+          : 'walletconnect';
         const realAddr = await connectInjectedWeb3Wallet(providerType);
         if (realAddr) {
           resolvedAddress = realAddr;
@@ -322,13 +344,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const isOwner = resolvedAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
       const displayAddr = `${resolvedAddress.slice(0, 6)}...${resolvedAddress.slice(-4)}`;
 
-      let onChainOkb = isOwner ? 25.0 : 0.0;
-      let onChainUsdc = isOwner ? 1000.0 : 0.0;
+      let onChainOkb = 0.0;
+      let onChainUsdt = 0.0;
+      let onChainUsdc = 0.0;
 
       try {
         const onChain = await fetchOnChainBalances(resolvedAddress);
         if (onChain.isLive) {
           onChainOkb = onChain.okb;
+          onChainUsdt = onChain.usdt;
           onChainUsdc = onChain.usdc;
         }
       } catch (e) {
@@ -344,8 +368,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...existingProfile,
           walletAddress: resolvedAddress,
           isAdmin: isOwner,
-          balanceOkb: onChainOkb > 0 ? onChainOkb : (existingProfile.balanceOkb || (isOwner ? 25.0 : 0.0)),
-          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (existingProfile.balanceUsdc || (isOwner ? 1000.0 : 0.0)),
+          balanceOkb: onChainOkb > 0 ? onChainOkb : (existingProfile.balanceOkb || 0),
+          balanceUsdt: onChainUsdt > 0 ? onChainUsdt : (existingProfile.balanceUsdt || 0),
+          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (existingProfile.balanceUsdc || 0),
         };
         setUser(updated);
         setIsConnected(true);
@@ -354,9 +379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setPendingWalletAddress(null);
         await saveUserProfile(updated);
         showToast(
-          isOwner
-            ? `Owner Admin Verified: ${displayAddr}`
-            : `Welcome back, ${updated.username}! Connected: ${displayAddr}`,
+          `Welcome back, ${updated.username}! Connected: ${displayAddr}`,
           'success'
         );
       } else {
@@ -380,14 +403,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const resolvedAddress = pendingWalletAddress;
     const isOwner = resolvedAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
-    const displayAddr = `${resolvedAddress.slice(0, 6)}...${resolvedAddress.slice(-4)}`;
 
-    let onChainOkb = isOwner ? 25.0 : 0.0;
-    let onChainUsdc = isOwner ? 1000.0 : 0.0;
+    let onChainOkb = 0.0;
+    let onChainUsdt = 0.0;
+    let onChainUsdc = 0.0;
     try {
       const onChain = await fetchOnChainBalances(resolvedAddress);
       if (onChain.isLive) {
         onChainOkb = onChain.okb;
+        onChainUsdt = onChain.usdt;
         onChainUsdc = onChain.usdc;
       }
     } catch (e) {
@@ -406,19 +430,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       walletAddress: resolvedAddress,
       username: chosenUsername,
       avatar: chosenAvatar || generateRandomAvatar(resolvedAddress),
-      title: isOwner ? 'Deployer & Arbiter' : 'Arena Contender',
+      title: 'Arena Contender',
       bio: 'Competitive contender on X Layer zkEVM.',
       joinedDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-      balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (isOwner ? 1000.0 : 0.0),
-      balanceOkb: onChainOkb > 0 ? onChainOkb : (isOwner ? 25.0 : 0.0),
+      balanceUsdt: onChainUsdt,
+      balanceUsdc: onChainUsdc,
+      balanceOkb: onChainOkb,
       totalPrizesWonUsdc: 0,
-      globalRank: isOwner ? 1 : 0,
-      chessRating: 1200,
-      chessPeakRating: 1200,
+      globalRank: 0,
+      chessRating: 0,
+      chessPeakRating: 0,
       chessTier: 'Bronze',
       chessStats: { wins: 0, losses: 0, draws: 0, streak: 0 },
-      score2048Rating: 1200,
-      score2048PeakRating: 1200,
+      score2048Rating: 0,
+      score2048PeakRating: 0,
       bestScore2048: 0,
       tier2048: 'Bronze',
       stats2048: { gamesPlayed: 0, wins2048: 0, highestTile: 0, streak: 0 },

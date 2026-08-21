@@ -49,6 +49,31 @@ export const Game2048View: React.FC = () => {
   const [startTime, setStartTime] = useState<number>(Date.now());
   const [movesPerSec, setMovesPerSec] = useState<number>(0);
 
+  // Device touch detection state (capability detection, not just viewport width)
+  const [isTouchDevice, setIsTouchDevice] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      'ontouchstart' in window ||
+      navigator.maxTouchPoints > 0 ||
+      Boolean((navigator as any).msMaxTouchPoints && (navigator as any).msMaxTouchPoints > 0) ||
+      Boolean(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+      Boolean(window.matchMedia && window.matchMedia('(any-pointer: coarse)').matches)
+    );
+  });
+
+  // Touchstart listener to dynamically catch touch interaction on dual-input devices
+  useEffect(() => {
+    const handleTouchDetected = () => {
+      setIsTouchDevice(true);
+    };
+    window.addEventListener('touchstart', handleTouchDetected, { passive: true, once: true });
+    return () => window.removeEventListener('touchstart', handleTouchDetected);
+  }, []);
+
+  // Swipe tracking references for board touch gestures
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const swipeTriggered = useRef<boolean>(false);
+
   // AI Algorithmic Run breakdown
   const [aiAnalysis, setAiAnalysis] = useState<{
     monotonicityScore: number;
@@ -342,6 +367,90 @@ export const Game2048View: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [move]);
 
+  // Touch & Pointer Swipe Gesture Handlers directly on the 2048 board
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      touchStartPos.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+      };
+      swipeTriggered.current = false;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartPos.current || swipeTriggered.current || isGameOver) return;
+
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - touchStartPos.current.x;
+    const deltaY = currentY - touchStartPos.current.y;
+    const SWIPE_THRESHOLD = 30; // Minimum swipe distance in px to prevent jitter/taps
+
+    if (Math.abs(deltaX) >= SWIPE_THRESHOLD || Math.abs(deltaY) >= SWIPE_THRESHOLD) {
+      swipeTriggered.current = true; // Lock: one swipe triggers strictly one move
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        if (deltaX > 0) {
+          move('right');
+        } else {
+          move('left');
+        }
+      } else {
+        if (deltaY > 0) {
+          move('down');
+        } else {
+          move('up');
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartPos.current = null;
+    swipeTriggered.current = false;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    touchStartPos.current = {
+      x: e.clientX,
+      y: e.clientY,
+    };
+    swipeTriggered.current = false;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!touchStartPos.current || swipeTriggered.current || isGameOver) return;
+    if (e.buttons === 0 && e.pointerType === 'mouse') return;
+
+    const currentX = e.clientX;
+    const currentY = e.clientY;
+    const deltaX = currentX - touchStartPos.current.x;
+    const deltaY = currentY - touchStartPos.current.y;
+    const SWIPE_THRESHOLD = 30;
+
+    if (Math.abs(deltaX) >= SWIPE_THRESHOLD || Math.abs(deltaY) >= SWIPE_THRESHOLD) {
+      swipeTriggered.current = true;
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        if (deltaX > 0) {
+          move('right');
+        } else {
+          move('left');
+        }
+      } else {
+        if (deltaY > 0) {
+          move('down');
+        } else {
+          move('up');
+        }
+      }
+    }
+  };
+
+  const handlePointerUp = () => {
+    touchStartPos.current = null;
+    swipeTriggered.current = false;
+  };
+
   // High Contrast Styling helper for tiles
   const getTileStyles = (val: number) => {
     if (val === 0) return 'bg-[#181D24] text-transparent border-white/5';
@@ -435,7 +544,18 @@ export const Game2048View: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
         {/* Left Side: 2048 Board Container (Cols 1-7) */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="relative aspect-square max-w-[480px] mx-auto bg-[#0A0E14] border-2 border-white/25 p-3 sm:p-4 shadow-2xl">
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            style={{ touchAction: 'none' }}
+            className="relative aspect-square max-w-[480px] mx-auto bg-[#0A0E14] border-2 border-white/25 p-3 sm:p-4 shadow-2xl select-none cursor-grab active:cursor-grabbing"
+          >
             <div className="grid grid-cols-4 grid-rows-4 gap-2 sm:gap-3 w-full h-full">
               {grid.map((row, r) =>
                 row.map((val, c) => (
@@ -481,35 +601,46 @@ export const Game2048View: React.FC = () => {
             )}
           </div>
 
-          {/* On-Screen Mobile D-Pad */}
-          <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto sm:hidden pt-2">
-            <div />
-            <button
-              onClick={() => move('up')}
-              className="p-3.5 bg-[#0A0A0A] border border-white/20 active:bg-[#CCFF00] active:text-black text-white flex items-center justify-center"
-            >
-              <ChevronUp className="w-5 h-5" />
-            </button>
-            <div />
-            <button
-              onClick={() => move('left')}
-              className="p-3.5 bg-[#0A0A0A] border border-white/20 active:bg-[#CCFF00] active:text-black text-white flex items-center justify-center"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => move('down')}
-              className="p-3.5 bg-[#0A0A0A] border border-white/20 active:bg-[#CCFF00] active:text-black text-white flex items-center justify-center"
-            >
-              <ChevronDown className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => move('right')}
-              className="p-3.5 bg-[#0A0A0A] border border-white/20 active:bg-[#CCFF00] active:text-black text-white flex items-center justify-center"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
+          {/* Optional Directional Controls (ONLY displayed on non-touch desktop devices) */}
+          {!isTouchDevice && (
+            <div className="hidden md:flex flex-col items-center space-y-2 pt-1 opacity-75 hover:opacity-100 transition">
+              <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
+                Desktop Directional Fallback
+              </span>
+              <div className="grid grid-cols-3 gap-1.5 max-w-[150px]">
+                <div />
+                <button
+                  onClick={() => move('up')}
+                  className="p-2 bg-[#0A0A0A] border border-white/20 hover:border-[#CCFF00] hover:text-[#CCFF00] text-white flex items-center justify-center transition"
+                  title="Move Up"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+                <div />
+                <button
+                  onClick={() => move('left')}
+                  className="p-2 bg-[#0A0A0A] border border-white/20 hover:border-[#CCFF00] hover:text-[#CCFF00] text-white flex items-center justify-center transition"
+                  title="Move Left"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => move('down')}
+                  className="p-2 bg-[#0A0A0A] border border-white/20 hover:border-[#CCFF00] hover:text-[#CCFF00] text-white flex items-center justify-center transition"
+                  title="Move Down"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => move('right')}
+                  className="p-2 bg-[#0A0A0A] border border-white/20 hover:border-[#CCFF00] hover:text-[#CCFF00] text-white flex items-center justify-center transition"
+                  title="Move Right"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Telemetry & AI Algorithm Optimizer (Cols 8-12) */}
@@ -535,8 +666,17 @@ export const Game2048View: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 text-[11px] text-white/50 leading-relaxed font-mono">
-              Keyboard Controls: Use <kbd className="px-1.5 py-0.5 bg-black border border-white/20 text-white font-bold">W A S D</kbd> or arrow keys to slide tiles instantly.
+            <div className="pt-2 text-[11px] text-white/60 leading-relaxed font-mono">
+              {isTouchDevice ? (
+                <div className="flex items-center space-x-2 text-[#CCFF00]">
+                  <Zap className="w-3.5 h-3.5 shrink-0" />
+                  <span>Touchscreen Active: Swipe up, down, left, or right directly on the grid.</span>
+                </div>
+              ) : (
+                <span>
+                  Keyboard Controls: Use <kbd className="px-1.5 py-0.5 bg-black border border-white/20 text-white font-bold">W A S D</kbd> or arrow keys to slide tiles instantly.
+                </span>
+              )}
             </div>
           </div>
 

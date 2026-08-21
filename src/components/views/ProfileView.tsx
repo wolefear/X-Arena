@@ -244,11 +244,6 @@ export const ProfileView: React.FC = () => {
                 <h1 className="text-2xl sm:text-4xl font-black text-white uppercase tracking-tight font-display break-words">
                   {user.username}
                 </h1>
-                {user.isAdmin && (
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#CCFF00] text-black font-mono">
-                    Admin
-                  </span>
-                )}
                 <button
                   onClick={openEditModal}
                   className="px-2.5 py-1 bg-white/5 hover:bg-white/15 text-white/70 hover:text-white border border-white/15 text-[10px] font-mono font-bold uppercase transition flex items-center space-x-1"
@@ -279,11 +274,14 @@ export const ProfileView: React.FC = () => {
 
               {/* Balances */}
               <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1 text-xs font-mono">
-                <span className="text-white/70">
-                  Balance: <strong className="text-[#CCFF00] font-black font-mono">{user.balanceUsdc.toFixed(2)} USDC</strong>
+                <span className="text-white/80">
+                  OKB: <strong className="text-[#CCFF00] font-black font-mono">{(user.balanceOkb || 0).toFixed(4)}</strong>
                 </span>
-                <span className="text-white/50">
-                  Gas: <strong className="text-white font-mono">{user.balanceOkb.toFixed(4)} OKB</strong>
+                <span className="text-white/80">
+                  USDT: <strong className="text-emerald-400 font-black font-mono">${(user.balanceUsdt || 0).toFixed(2)}</strong>
+                </span>
+                <span className="text-white/60">
+                  USDC: <strong className="text-cyan-400 font-black font-mono">${(user.balanceUsdc || 0).toFixed(2)}</strong>
                 </span>
               </div>
 

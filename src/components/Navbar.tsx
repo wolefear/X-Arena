@@ -143,10 +143,10 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
             {/* Socials / Twitter X button */}
             <a
-              href="https://x.com"
+              href="https://x.com/XArena_Protocol"
               target="_blank"
               rel="noreferrer"
-              title="Official Arena Twitter / X Community & Twitter Game"
+              title="Official Arena Twitter / X: @XArena_Protocol"
               className="p-2 sm:p-2.5 bg-[#0A0A0A] border border-white/10 text-white/60 hover:text-[#CCFF00] hover:border-white/30 transition flex items-center justify-center shrink-0"
             >
               <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
@@ -190,10 +190,10 @@ export const Navbar: React.FC = () => {
                 >
                   <div className="flex flex-col text-right">
                     <span className="text-[11px] sm:text-xs font-mono font-bold text-white whitespace-nowrap">
-                      {user.balanceUsdc.toFixed(1)} <span className="text-[#CCFF00] font-mono">USDC</span>
+                      {(user.balanceOkb || 0).toFixed(3)} <span className="text-[#CCFF00] font-mono">OKB</span>
                     </span>
-                    <span className="text-[9px] sm:text-[10px] text-white/40 font-mono tracking-wider truncate max-w-[60px] sm:max-w-[110px]">
-                      {user.walletAddress}
+                    <span className="text-[9px] sm:text-[10px] text-white/50 font-mono tracking-wider truncate max-w-[70px] sm:max-w-[110px]">
+                      ${(user.balanceUsdt || user.balanceUsdc || 0).toFixed(2)} USDT
                     </span>
                   </div>
                   <div className="w-7 h-7 sm:w-8 sm:h-8 border border-white/20 overflow-hidden shrink-0">
@@ -237,14 +237,18 @@ export const Navbar: React.FC = () => {
                     </div>
 
                     {/* Balance stats */}
-                    <div className="grid grid-cols-2 gap-2 text-center font-mono">
+                    <div className="grid grid-cols-3 gap-1.5 text-center font-mono">
                       <div className="bg-black p-2 border border-white/10">
-                        <span className="text-[9px] text-white/40 uppercase block font-bold">USDC Vault</span>
-                        <span className="text-xs font-bold text-white">{user.balanceUsdc.toFixed(2)}</span>
+                        <span className="text-[8px] text-white/40 uppercase block font-bold">OKB Gas</span>
+                        <span className="text-[11px] font-bold text-[#CCFF00]">{(user.balanceOkb || 0).toFixed(3)}</span>
                       </div>
                       <div className="bg-black p-2 border border-white/10">
-                        <span className="text-[9px] text-white/40 uppercase block font-bold">X Layer OKB</span>
-                        <span className="text-xs font-bold text-[#CCFF00]">{user.balanceOkb.toFixed(4)}</span>
+                        <span className="text-[8px] text-white/40 uppercase block font-bold">USDT Vault</span>
+                        <span className="text-[11px] font-bold text-emerald-400">${(user.balanceUsdt || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black p-2 border border-white/10">
+                        <span className="text-[8px] text-white/40 uppercase block font-bold">USDC</span>
+                        <span className="text-[11px] font-bold text-cyan-400">${(user.balanceUsdc || 0).toFixed(2)}</span>
                       </div>
                     </div>
 
