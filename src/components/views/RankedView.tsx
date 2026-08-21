@@ -109,7 +109,7 @@ export const RankedView: React.FC = () => {
           Ranked Arena
         </h1>
         <p className="text-xs sm:text-sm text-white/50 mt-2 max-w-2xl leading-relaxed">
-          Duel global contenders in skill-calibrated queues. Earn Ranked XP on victories, lose XP on defeats, and climb tiers.
+          Duel global contenders in skill-calibrated queues. Chess features Elo rating progression (+20W / +5D / -15L), while 2048 features permanent highest-tile milestone unlocks (never decreases on game loss).
         </p>
       </div>
 
@@ -129,10 +129,10 @@ export const RankedView: React.FC = () => {
               <span className="text-2xl sm:text-3xl shrink-0">♟️</span>
               <div className="min-w-0">
                 <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight font-display truncate">
-                  Chess
+                  Chess Masters
                 </h3>
                 <span className="text-[10px] text-white/40 uppercase font-mono tracking-wider block truncate">
-                  Win: +XP • Loss: -XP
+                  Win: +20 • Draw: +5 • Loss: -15
                 </span>
               </div>
             </div>
@@ -161,10 +161,10 @@ export const RankedView: React.FC = () => {
               <span className="text-2xl sm:text-3xl shrink-0">⚡</span>
               <div className="min-w-0">
                 <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight font-display truncate">
-                  2048
+                  2048 Tile Milestones
                 </h3>
                 <span className="text-[10px] text-white/40 uppercase font-mono tracking-wider block truncate">
-                  Speed & Efficiency
+                  Max: {user.stats2048?.highestTile || 0} • Never Decreases on Loss
                 </span>
               </div>
             </div>

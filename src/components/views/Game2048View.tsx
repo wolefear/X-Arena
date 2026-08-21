@@ -311,27 +311,31 @@ export const Game2048View: React.FC = () => {
   const handleGameOverMatch = (finalScore: number, maxTileVal: number, totalMoves: number) => {
     const isWin = maxTileVal >= 2048;
     const durationSeconds = Math.max(1, (Date.now() - startTime) / 1000);
+    const isRanked = activeMode === 'ranked';
     const xpDelta = calculate2048XpDelta(
       user.score2048Rating,
       finalScore,
       maxTileVal,
       totalMoves,
-      durationSeconds
+      durationSeconds,
+      user.stats2048?.highestTile || 0,
+      isRanked,
+      false
     );
 
     setLastXpDelta(xpDelta);
 
     addMatchRecord({
-      id: `match_2048_${Date.now()}`,
       game: '2048',
       mode: activeMode,
-      opponentName: 'High Score Velocity Leaderboard',
+      opponentName: isRanked ? 'Ranked Milestone Progression' : 'Unranked Practice Grid',
       opponentRating: 1850,
       result: isWin ? 'win' : 'loss',
       ratingDelta: xpDelta,
       playerScore: finalScore,
-      timestamp: new Date().toISOString(),
+      highestTile: maxTileVal,
       movesCount: totalMoves,
+      durationSeconds,
     });
 
     // Run AI analysis

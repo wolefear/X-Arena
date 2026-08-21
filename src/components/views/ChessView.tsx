@@ -316,24 +316,20 @@ export const ChessView: React.FC = () => {
       sound.playDefeat();
     }
 
-    const calculatedXpDelta = calculateChessXpDelta(
-      user.chessRating,
-      opponentXp,
-      resultStatus,
-      moveHistory.length
-    );
+    const isRanked = activeMode === 'ranked';
+    const calculatedXpDelta = isRanked
+      ? calculateChessXpDelta(user.chessRating, opponentXp, resultStatus, moveHistory.length, false)
+      : 0;
 
     setLastXpDelta(calculatedXpDelta);
 
     addMatchRecord({
-      id: `match_${Date.now()}`,
       game: 'chess',
       mode: activeMode,
       opponentName,
       opponentRating: opponentXp,
       result: resultStatus,
       ratingDelta: calculatedXpDelta,
-      timestamp: new Date().toISOString(),
       movesCount: moveHistory.length,
     });
 

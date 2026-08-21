@@ -278,7 +278,7 @@ export async function deleteLiveEvent(eventId: string): Promise<void> {
 }
 
 /**
- * 2. Matches collection
+ * 2. Matches collection & Atomic Progression Service
  */
 export async function saveMatchRecord(match: MatchRecord, userId: string): Promise<void> {
   try {
@@ -292,6 +292,38 @@ export async function saveMatchRecord(match: MatchRecord, userId: string): Promi
     console.warn('Error saving match record to Firestore:', err);
   }
 }
+
+export async function commitMatchProgressionAtomically(
+  walletAddress: string,
+  updatedUser: UserProfile,
+  matchRecord: MatchRecord
+): Promise<void> {
+  if (!walletAddress) return;
+  try {
+    const docId = walletAddress.trim().toLowerCase();
+    const matchId = matchRecord.id || `match_${Date.now()}`;
+
+    // Write match record
+    await setDoc(doc(db, 'matches', matchId), {
+      ...matchRecord,
+      userId: docId,
+      timestamp: Date.now(),
+    });
+
+    // Write updated user profile atomically
+    const payload = {
+      ...updatedUser,
+      id: updatedUser.id || `usr_${docId}`,
+      walletAddress,
+      usernameNormalized: updatedUser.username ? updatedUser.username.toLowerCase() : '',
+      updatedAt: Date.now(),
+    };
+    await setDoc(doc(db, 'users', docId), payload, { merge: true });
+  } catch (err) {
+    console.error('Atomic match progression commit error:', err);
+  }
+}
+
 
 export function subscribeUserMatches(userId: string, callback: (matches: MatchRecord[]) => void) {
   if (!userId) return () => {};

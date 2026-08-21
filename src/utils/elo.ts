@@ -1,44 +1,107 @@
 import { ChessTier } from '../types';
 
 /**
- * Competitive XP Progression Formula for Chess
- * - Win: +25 to +50 XP (scaled by performance and opponent XP)
- * - Loss: -12 to -24 XP (scaled by opponent rank)
- * - Draw: +5 XP
+ * 2048 Highest-Tile Achievement Milestone Progression Table
+ * 128: +5
+ * 256: +10
+ * 512: +20
+ * 1024: +35
+ * 2048: +55
+ * 4096: +80
+ * 8192: +110
+ * 16384: +145
+ * 32768: +185
  */
+export const TILE_2048_MILESTONES: { tile: number; points: number }[] = [
+  { tile: 128, points: 5 },
+  { tile: 256, points: 10 },
+  { tile: 512, points: 20 },
+  { tile: 1024, points: 35 },
+  { tile: 2048, points: 55 },
+  { tile: 4096, points: 80 },
+  { tile: 8192, points: 110 },
+  { tile: 16384, points: 145 },
+  { tile: 32768, points: 185 },
+];
+
+/**
+ * Calculates new progression points for a completed Ranked 2048 game.
+ * Rule: Ranked 2048 rank can NEVER decrease from a normal game over / loss.
+ * Progression is awarded strictly when achieving a new, previously unreached milestone tile.
+ */
+export function calculate2048RankedProgression(
+  prevHighestTile: number,
+  currentMatchHighestTile: number
+): { pointsDelta: number; newHighestTile: number; newMilestonesUnlocked: number[] } {
+  if (currentMatchHighestTile <= prevHighestTile) {
+    return {
+      pointsDelta: 0,
+      newHighestTile: prevHighestTile,
+      newMilestonesUnlocked: [],
+    };
+  }
+
+  let pointsDelta = 0;
+  const newMilestonesUnlocked: number[] = [];
+
+  for (const milestone of TILE_2048_MILESTONES) {
+    if (milestone.tile > prevHighestTile && milestone.tile <= currentMatchHighestTile) {
+      pointsDelta += milestone.points;
+      newMilestonesUnlocked.push(milestone.tile);
+    }
+  }
+
+  return {
+    pointsDelta,
+    newHighestTile: currentMatchHighestTile,
+    newMilestonesUnlocked,
+  };
+}
+
+/**
+ * Competitive Rating Formula for Ranked Chess
+ * - Win: +20 points
+ * - Draw: +5 points
+ * - Normal Loss: -15 points
+ * - Forfeit: -30 points
+ */
+export function calculateChessRatingDelta(
+  result: 'win' | 'loss' | 'draw',
+  isForfeit: boolean = false
+): number {
+  if (isForfeit) {
+    return -30;
+  }
+  if (result === 'win') {
+    return 20;
+  }
+  if (result === 'draw') {
+    return 5;
+  }
+  return -15;
+}
+
+// Backwards compatibility alias
 export function calculateChessXpDelta(
   playerXp: number,
   opponentXp: number,
   result: 'win' | 'loss' | 'draw',
-  movesCount: number = 25
+  movesCount: number = 25,
+  isForfeit: boolean = false
 ): number {
-  if (result === 'win') {
-    const diff = Math.max(-300, Math.min(300, opponentXp - playerXp));
-    const baseWinXp = 30;
-    const diffBonus = Math.round(diff / 30);
-    const speedBonus = movesCount < 30 ? 5 : 0;
-    return Math.max(15, Math.min(55, baseWinXp + diffBonus + speedBonus));
-  } else if (result === 'loss') {
-    const diff = Math.max(-300, Math.min(300, playerXp - opponentXp));
-    const baseLossXp = -18;
-    const penalty = Math.round(diff / 40);
-    return Math.min(-8, Math.max(-35, baseLossXp - penalty));
-  } else {
-    return 5;
-  }
+  return calculateChessRatingDelta(result, isForfeit);
 }
 
-// Alias for backwards compatibility
 export const calculateChessEloDelta = calculateChessXpDelta;
 
 export function getXpTier(xp: number): ChessTier {
-  if (xp < 1000) return 'Bronze';
-  if (xp < 1300) return 'Silver';
-  if (xp < 1600) return 'Gold';
-  if (xp < 1900) return 'Platinum';
-  if (xp < 2200) return 'Diamond';
-  if (xp < 2500) return 'Master';
-  if (xp < 2900) return 'Grandmaster';
+  if (xp < 200) return 'Bronze';
+  if (xp < 500) return 'Silver';
+  if (xp < 900) return 'Gold';
+  if (xp < 1400) return 'Platinum';
+  if (xp < 2000) return 'Diamond';
+  if (xp < 2800) return 'Master';
+  if (xp < 3800) return 'Grandmaster';
   return 'Apex';
 }
 
@@ -103,29 +166,29 @@ export function getTierColor(tier: ChessTier | string): {
 }
 
 /**
- * Ranked XP Delta for 2048
- * - Win (2048+ tile or high score threshold): +25 to +60 XP
- * - Loss (game over before threshold): -10 to -22 XP
+ * 2048 XP Delta Calculation
+ * For Ranked 2048: Calls calculate2048RankedProgression (points strictly based on new highest tile reached)
+ * Normal 2048: 0 ranked progression
  */
 export function calculate2048XpDelta(
-  currentXp: number,
+  currentScore2048Rating: number,
   score: number,
   highestTile: number,
   moves: number,
-  durationSeconds: number
+  durationSeconds: number,
+  prevHighestTile: number = 0,
+  isRanked: boolean = true,
+  isForfeit: boolean = false
 ): number {
-  if (moves <= 10) return 0;
-
-  if (highestTile >= 2048 || score >= 12000) {
-    const tileMultiplier = highestTile >= 4096 ? 1.8 : highestTile >= 2048 ? 1.3 : 1.0;
-    const efficiency = moves > 0 ? Math.min(2.0, (score / moves) / 10) : 1;
-    const gainedXp = Math.round(28 * tileMultiplier * efficiency);
-    return Math.max(20, Math.min(65, gainedXp));
-  } else {
-    // Loss or low run
-    const lossPenalty = score < 2000 ? -20 : score < 5000 ? -15 : -10;
-    return lossPenalty;
+  if (isForfeit) {
+    return isRanked ? -30 : 0;
   }
+  if (!isRanked) {
+    return 0;
+  }
+  const { pointsDelta } = calculate2048RankedProgression(prevHighestTile, highestTile);
+  return pointsDelta;
 }
 
 export const calculate2048RatingDelta = calculate2048XpDelta;
+

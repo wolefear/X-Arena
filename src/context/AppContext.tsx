@@ -21,13 +21,14 @@ import {
   INITIAL_TRANSACTIONS,
 } from '../data/mockData';
 import { sound } from '../utils/audio';
-import { getChessTier } from '../utils/elo';
+import { getChessTier, calculate2048RankedProgression } from '../utils/elo';
 import { fetchOnChainBalances } from '../utils/web3OnChain';
 import { connectInjectedWeb3Wallet } from '../utils/walletConnector';
 import {
   subscribeLiveEvents,
   saveLiveEvent,
   saveMatchRecord as saveFirestoreMatchRecord,
+  commitMatchProgressionAtomically,
   subscribeUserMatches,
   saveUserProfile,
   fetchUserProfile,
@@ -37,6 +38,8 @@ import {
 } from '../lib/firestoreService';
 
 export const OWNER_ADMIN_WALLET = '0xeDf63F61FfD9B8dABEb1179F3Cd4D2968C6003Be';
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes in milliseconds
+
 
 export interface ForfeitModalState {
   isOpen: boolean;
@@ -188,6 +191,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       user.walletAddress &&
       user.walletAddress.trim().toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase()
   );
+
+  // 5-Minute Inactivity Auto-Disconnect System
+  useEffect(() => {
+    if (!isConnected) return;
+
+    let lastActivityTime = Date.now();
+
+    const handleUserActivity = () => {
+      lastActivityTime = Date.now();
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'pointerdown', 'scroll', 'wheel'];
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    const checkInactivity = () => {
+      if (!isConnected) return;
+      const elapsed = Date.now() - lastActivityTime;
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        // Disconnect immediately on 5 minutes inactivity
+        setIsConnected(false);
+        setUser(INITIAL_USER);
+        setIsOnboardingOpen(false);
+        setPendingWalletAddress(null);
+        localStorage.removeItem('xarena_connected');
+        localStorage.removeItem('xarena_user');
+        if (currentView === 'admin' || currentView === 'profile') {
+          setCurrentView('home');
+        }
+        showToast('Wallet session expired due to 5 minutes of inactivity. Reconnect to resume.', 'warning');
+      }
+    };
+
+    const intervalId = setInterval(checkInactivity, 5000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkInactivity();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isConnected, currentView]);
 
   // Real-time Firestore synchronization for Events
   useEffect(() => {
@@ -527,7 +581,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const promptForfeit = (targetView: string | null, customCallback?: () => void) => {
     const isRanked = activeMode === 'ranked' || gameSession.mode === 'ranked';
-    const xpPenalty = isRanked ? (selectedGame === 'chess' ? 50 : 60) : 0;
+    const xpPenalty = isRanked ? 30 : 0;
 
     setForfeitModalState({
       isOpen: true,
@@ -544,11 +598,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const game = selectedGame;
 
     if (isRanked && penalty > 0) {
+      let updatedUser: UserProfile;
+      const forfeitRecord: MatchRecord = {
+        id: `match_forfeit_${Date.now()}`,
+        game: game || 'chess',
+        mode: 'ranked',
+        opponentName: activeAiOpponent?.name || 'Grandmaster Bot',
+        result: 'loss',
+        ratingDelta: -30,
+        movesCount: gameSession.movesCount,
+        durationSeconds: 0,
+        rewardsEarnedUsdc: 0,
+        date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
       setUser((prev) => {
-        let updated: UserProfile;
         if (game === 'chess') {
-          const newRating = Math.max(400, prev.chessRating - penalty);
-          updated = {
+          const newRating = Math.max(0, prev.chessRating - 30);
+          updatedUser = {
             ...prev,
             chessRating: newRating,
             chessTier: getChessTier(newRating),
@@ -559,22 +626,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
           };
         } else {
-          const newRating = Math.max(400, prev.score2048Rating - penalty);
-          updated = {
+          // 2048 forfeit: -30 points, highestTile is NOT updated, streak reset to 0
+          const newRating = Math.max(0, prev.score2048Rating - 30);
+          updatedUser = {
             ...prev,
             score2048Rating: newRating,
+            tier2048: getChessTier(newRating),
             stats2048: {
               ...prev.stats2048,
+              gamesPlayed: prev.stats2048.gamesPlayed + 1,
               streak: 0,
             },
           };
         }
         if (prev.walletAddress) {
-          saveUserProfile(updated);
+          commitMatchProgressionAtomically(prev.walletAddress, updatedUser, forfeitRecord);
         }
-        return updated;
+        return updatedUser;
       });
-      showToast(`Ranked Match Forfeited: -${penalty} XP penalty applied.`, 'error');
+
+      setMatchHistory((prev) => [forfeitRecord, ...prev.slice(0, 49)]);
+      showToast(`Ranked Match Forfeited: -30 XP penalty applied.`, 'error');
     }
 
     setGameSession({
@@ -629,6 +701,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addMatchRecord = (recordData: Omit<MatchRecord, 'id' | 'date'>) => {
+    const isRanked = recordData.mode === 'ranked';
     const newRecord: MatchRecord = {
       ...recordData,
       id: `match_${Date.now()}`,
@@ -637,18 +710,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setMatchHistory((prev) => [newRecord, ...prev.slice(0, 49)]);
 
-    if (user.walletAddress) {
-      saveFirestoreMatchRecord(newRecord, user.walletAddress);
-    }
-
-    // Update user stats and sync to Firestore
+    // Update user stats and sync atomically to Firestore
     setUser((prev) => {
       let updated: UserProfile = { ...prev };
       if (recordData.game === 'chess') {
         const isWin = recordData.result === 'win';
         const isLoss = recordData.result === 'loss';
         const isDraw = recordData.result === 'draw';
-        const newRating = Math.max(400, prev.chessRating + recordData.ratingDelta);
+
+        // Chess rating changes ONLY if ranked: Win +20, Draw +5, Loss -15 (floor at 0)
+        let ratingDelta = 0;
+        if (isRanked) {
+          ratingDelta = isWin ? 20 : isDraw ? 5 : -15;
+        }
+
+        const newRating = isRanked ? Math.max(0, prev.chessRating + ratingDelta) : prev.chessRating;
         const newPeak = Math.max(prev.chessPeakRating, newRating);
 
         updated = {
@@ -667,16 +743,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       } else if (recordData.game === '2048') {
         const isWin = recordData.result === 'win';
-        const newRating = Math.max(400, prev.score2048Rating + recordData.ratingDelta);
+        const matchHighestTile = recordData.highestTile || 0;
+        const prevHighestTile = prev.stats2048?.highestTile || 0;
+
+        let pointsDelta = 0;
+        let newHighestTile = prevHighestTile;
+
+        if (isRanked) {
+          // Ranked 2048 Milestone Progression: can NEVER decrease from game loss
+          const prog = calculate2048RankedProgression(prevHighestTile, matchHighestTile);
+          pointsDelta = prog.pointsDelta;
+          newHighestTile = prog.newHighestTile;
+        }
+
+        const newRating = isRanked ? prev.score2048Rating + pointsDelta : prev.score2048Rating;
         const newPeak = Math.max(prev.score2048PeakRating, newRating);
         const newBestScore = Math.max(prev.bestScore2048, recordData.playerScore || 0);
-        const newHighestTile = Math.max(prev.stats2048.highestTile, recordData.highestTile || 0);
 
         updated = {
           ...prev,
           score2048Rating: newRating,
           score2048PeakRating: newPeak,
           bestScore2048: newBestScore,
+          tier2048: getChessTier(newRating),
           stats2048: {
             gamesPlayed: prev.stats2048.gamesPlayed + 1,
             wins2048: prev.stats2048.wins2048 + (isWin ? 1 : 0),
@@ -689,7 +778,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (prev.walletAddress) {
-        saveUserProfile(updated);
+        commitMatchProgressionAtomically(prev.walletAddress, updated, newRecord);
       }
       return updated;
     });
