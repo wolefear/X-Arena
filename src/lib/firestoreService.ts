@@ -25,6 +25,112 @@ export function generateRandomAvatar(customSeed?: string): string {
 }
 
 /**
+ * Seed Profiles for Initial Central Database Population
+ */
+export const SEED_USERS: UserProfile[] = [
+  {
+    id: 'usr_0x3a99281fe41209384812849012384918239081fe',
+    walletAddress: '0x3a99281fe41209384812849012384918239081fe',
+    username: 'Valkyrie_GM',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    title: 'Grandmaster Strategist',
+    bio: 'Apex tactical player on X Layer zkEVM.',
+    joinedDate: 'August 2026',
+    balanceUsdc: 12450,
+    balanceOkb: 14.5,
+    totalPrizesWonUsdc: 12450,
+    globalRank: 1,
+    chessRating: 2480,
+    chessPeakRating: 2510,
+    chessTier: 'Grandmaster',
+    chessStats: { wins: 184, losses: 22, draws: 14, streak: 8 },
+    score2048Rating: 2150,
+    score2048PeakRating: 2200,
+    bestScore2048: 131072,
+    tier2048: 'Grandmaster',
+    stats2048: { gamesPlayed: 140, wins2048: 112, highestTile: 8192, streak: 6 },
+    achievements: ['ach_first_win', 'ach_grandmaster', 'ach_2048_master'],
+    isCreator: false,
+    isAdmin: false,
+  },
+  {
+    id: 'usr_0x88f4902190184029184029184091284091849021',
+    walletAddress: '0x88f4902190184029184029184091284091849021',
+    username: 'SnakeGrid99',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    title: '2048 Speed Demon',
+    bio: 'Monotonic grid optimizer & positional speedrunner.',
+    joinedDate: 'August 2026',
+    balanceUsdc: 7800,
+    balanceOkb: 8.2,
+    totalPrizesWonUsdc: 7800,
+    globalRank: 2,
+    chessRating: 1890,
+    chessPeakRating: 1940,
+    chessTier: 'Master',
+    chessStats: { wins: 92, losses: 28, draws: 11, streak: 4 },
+    score2048Rating: 2310,
+    score2048PeakRating: 2350,
+    bestScore2048: 98400,
+    tier2048: 'Master',
+    stats2048: { gamesPlayed: 180, wins2048: 142, highestTile: 8192, streak: 12 },
+    achievements: ['ach_first_win', 'ach_2048_master'],
+    isCreator: false,
+    isAdmin: false,
+  },
+  {
+    id: 'usr_0x71c4e8b109284091284091284091824091844e8b',
+    walletAddress: '0x71c4e8b109284091284091284091824091844e8b',
+    username: 'KrypToKnight',
+    avatar: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=150&auto=format&fit=crop&q=80',
+    title: 'Tactical Striker',
+    bio: 'Chess enthusiast & tactical puzzle solver.',
+    joinedDate: 'August 2026',
+    balanceUsdc: 450,
+    balanceOkb: 2.5,
+    totalPrizesWonUsdc: 450,
+    globalRank: 3,
+    chessRating: 1640,
+    chessPeakRating: 1680,
+    chessTier: 'Platinum',
+    chessStats: { wins: 38, losses: 21, draws: 5, streak: 3 },
+    score2048Rating: 1580,
+    score2048PeakRating: 1600,
+    bestScore2048: 32768,
+    tier2048: 'Platinum',
+    stats2048: { gamesPlayed: 64, wins2048: 38, highestTile: 4096, streak: 2 },
+    achievements: ['ach_first_win'],
+    isCreator: false,
+    isAdmin: false,
+  },
+  {
+    id: 'usr_0x99a72bc1029480192840918240918204918272bc',
+    walletAddress: '0x99a72bc1029480192840912840918204918272bc',
+    username: 'QuantumPawn',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+    title: 'Positional Anchor',
+    bio: 'Endgame specialist on X Arena.',
+    joinedDate: 'August 2026',
+    balanceUsdc: 320,
+    balanceOkb: 1.8,
+    totalPrizesWonUsdc: 320,
+    globalRank: 4,
+    chessRating: 1590,
+    chessPeakRating: 1610,
+    chessTier: 'Gold',
+    chessStats: { wins: 49, losses: 35, draws: 9, streak: 2 },
+    score2048Rating: 1520,
+    score2048PeakRating: 1550,
+    bestScore2048: 28400,
+    tier2048: 'Gold',
+    stats2048: { gamesPlayed: 75, wins2048: 39, highestTile: 2048, streak: 1 },
+    achievements: ['ach_first_win'],
+    isCreator: false,
+    isAdmin: false,
+  },
+];
+
+/**
  * Username Uniqueness & Management
  */
 export async function checkUsernameAvailability(
@@ -46,19 +152,40 @@ export async function checkUsernameAvailability(
   }
 
   const lookupKey = cleaned.toLowerCase();
+  const currentWallet = currentWalletAddress ? currentWalletAddress.trim().toLowerCase() : '';
+
   try {
+    // 1. Check usernames registry collection
     const docSnap = await getDoc(doc(db, 'usernames', lookupKey));
     if (docSnap.exists()) {
       const data = docSnap.data();
-      const current = currentWalletAddress ? currentWalletAddress.toLowerCase() : '';
-      if (data?.walletAddress && data.walletAddress.toLowerCase() !== current) {
-        return { available: false, reason: `"${cleaned}" is already taken by another contender.` };
+      const existingWallet = data?.walletAddress ? data.walletAddress.toLowerCase() : '';
+      if (existingWallet && existingWallet !== currentWallet) {
+        return { available: false, reason: `"${cleaned}" is already claimed by another contender.` };
       }
     }
+
+    // 2. Check users collection
+    const usersSnap = await getDocs(collection(db, 'users'));
+    let taken = false;
+    usersSnap.forEach((d) => {
+      const u = d.data() as UserProfile;
+      if (
+        u.username &&
+        u.username.trim().toLowerCase() === lookupKey &&
+        u.walletAddress?.toLowerCase() !== currentWallet
+      ) {
+        taken = true;
+      }
+    });
+
+    if (taken) {
+      return { available: false, reason: `"${cleaned}" is already taken.` };
+    }
+
     return { available: true };
   } catch (err) {
-    console.warn('Firestore username check error:', err);
-    // Allow if offline fallback
+    console.warn('Firestore username check notice:', err);
     return { available: true };
   }
 }
@@ -73,13 +200,14 @@ export async function claimUsername(
     return { success: false, error: check.reason };
   }
 
-  const wallet = walletAddress ? walletAddress.toLowerCase() : 'guest';
+  const wallet = walletAddress ? walletAddress.trim().toLowerCase() : 'guest';
   const newKey = newUsername.trim().toLowerCase();
 
   try {
-    // 1. Claim new username doc
+    // 1. Claim new username doc in registry
     await setDoc(doc(db, 'usernames', newKey), {
       username: newUsername.trim(),
+      usernameNormalized: newKey,
       walletAddress: wallet,
       updatedAt: Date.now(),
     });
@@ -117,7 +245,7 @@ export function subscribeLiveEvents(callback: (events: ArenaEvent[]) => void) {
         callback(events);
       },
       (error) => {
-        console.warn('Firestore live events listener error:', error);
+        console.warn('Firestore live events listener notice:', error);
         callback([]);
       }
     );
@@ -179,7 +307,7 @@ export function subscribeUserMatches(userId: string, callback: (matches: MatchRe
         callback(records);
       },
       (err) => {
-        console.warn('Match history subscription note:', err);
+        console.warn('Match history subscription notice:', err);
       }
     );
   } catch (e) {
@@ -188,13 +316,82 @@ export function subscribeUserMatches(userId: string, callback: (matches: MatchRe
 }
 
 /**
- * 3. User Profiles
+ * 3. Central Users Collection & Real-Time Sync for Global Leaderboard
  */
+let hasSeededInitialUsers = false;
+
+export async function seedInitialUsersIfEmpty(): Promise<void> {
+  if (hasSeededInitialUsers) return;
+  try {
+    const snapshot = await getDocs(collection(db, 'users'));
+    if (snapshot.empty) {
+      for (const u of SEED_USERS) {
+        const docId = u.walletAddress.toLowerCase();
+        await setDoc(doc(db, 'users', docId), {
+          ...u,
+          usernameNormalized: u.username.toLowerCase(),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await setDoc(doc(db, 'usernames', u.username.toLowerCase()), {
+          username: u.username,
+          usernameNormalized: u.username.toLowerCase(),
+          walletAddress: u.walletAddress.toLowerCase(),
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    hasSeededInitialUsers = true;
+  } catch (err) {
+    console.warn('Seed initial users notice:', err);
+  }
+}
+
+export function subscribeAllUsers(callback: (users: UserProfile[]) => void) {
+  try {
+    const q = query(collection(db, 'users'));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        if (snapshot.empty) {
+          seedInitialUsersIfEmpty().then(() => {
+            callback(SEED_USERS);
+          });
+          return;
+        }
+        const usersList: UserProfile[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as UserProfile;
+          if (data && data.walletAddress) {
+            usersList.push(data);
+          }
+        });
+        callback(usersList.length > 0 ? usersList : SEED_USERS);
+      },
+      (err) => {
+        console.warn('Firestore users subscription notice:', err);
+        callback(SEED_USERS);
+      }
+    );
+  } catch (e) {
+    console.warn('Failed to subscribe all users:', e);
+    callback(SEED_USERS);
+    return () => {};
+  }
+}
+
 export async function saveUserProfile(user: UserProfile): Promise<void> {
   if (!user.walletAddress) return;
   try {
     const docId = user.walletAddress.toLowerCase();
-    await setDoc(doc(db, 'users', docId), user, { merge: true });
+    const payload = {
+      ...user,
+      id: user.id || `usr_${docId}`,
+      walletAddress: user.walletAddress,
+      usernameNormalized: user.username ? user.username.toLowerCase() : '',
+      updatedAt: Date.now(),
+    };
+    await setDoc(doc(db, 'users', docId), payload, { merge: true });
   } catch (err) {
     console.warn('Error saving user profile to Firestore:', err);
   }
@@ -203,7 +400,7 @@ export async function saveUserProfile(user: UserProfile): Promise<void> {
 export async function fetchUserProfile(walletAddress: string): Promise<UserProfile | null> {
   if (!walletAddress) return null;
   try {
-    const docId = walletAddress.toLowerCase();
+    const docId = walletAddress.trim().toLowerCase();
     const snap = await getDoc(doc(db, 'users', docId));
     if (snap.exists()) {
       return snap.data() as UserProfile;
@@ -212,36 +409,4 @@ export async function fetchUserProfile(walletAddress: string): Promise<UserProfi
     console.warn('Error fetching user profile from Firestore:', err);
   }
   return null;
-}
-
-/**
- * 4. Global Leaderboard
- */
-export function subscribeLeaderboard(callback: (entries: LeaderboardEntry[]) => void) {
-  try {
-    const q = query(collection(db, 'leaderboard'), orderBy('totalScore', 'desc'), limit(50));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const list: LeaderboardEntry[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as LeaderboardEntry);
-        });
-        callback(list);
-      },
-      (err) => {
-        console.warn('Leaderboard subscription note:', err);
-      }
-    );
-  } catch (e) {
-    return () => {};
-  }
-}
-
-export async function updateLeaderboardScore(entry: LeaderboardEntry): Promise<void> {
-  try {
-    await setDoc(doc(db, 'leaderboard', entry.walletAddress.toLowerCase()), entry, { merge: true });
-  } catch (err) {
-    console.warn('Error updating leaderboard score in Firestore:', err);
-  }
 }

@@ -1,16 +1,31 @@
 import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, OWNER_ADMIN_WALLET } from '../context/AppContext';
 import {
   X,
   Wallet,
   CheckCircle2,
+  Users,
+  Shield,
+  Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 import { sound } from '../utils/audio';
 import { MetaMaskNeonFox } from './icons/MetaMaskNeonFox';
 
 export const WalletModal: React.FC = () => {
-  const { isWalletModalOpen, setIsWalletModalOpen, connectWallet, isConnected, disconnectWallet, user, isAdmin } = useApp();
+  const {
+    isWalletModalOpen,
+    setIsWalletModalOpen,
+    connectWallet,
+    isConnected,
+    disconnectWallet,
+    user,
+    isAdmin,
+  } = useApp();
+
   const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [customAddressInput, setCustomAddressInput] = useState<string>('');
+  const [showTesterAccounts, setShowTesterAccounts] = useState<boolean>(true);
 
   if (!isWalletModalOpen) return null;
 
@@ -18,8 +33,8 @@ export const WalletModal: React.FC = () => {
     {
       id: 'okx',
       name: 'OKX Connect',
-      description: 'Primary native gateway on X Layer (zkEVM L2). Instant gasless connection.',
-      badge: 'OKX CONNECT',
+      description: 'Primary native gateway on X Layer (zkEVM L2). Injected browser wallet.',
+      badge: 'NATIVE L2',
       renderIcon: () => (
         <div className="w-10 h-10 bg-black border border-white/30 flex items-center justify-center p-2 shrink-0">
           <svg viewBox="0 0 24 24" className="w-full h-full text-white fill-current">
@@ -31,8 +46,8 @@ export const WalletModal: React.FC = () => {
     {
       id: 'metamask',
       name: 'MetaMask',
-      description: 'Connect via MetaMask extension or mobile dApp browser.',
-      badge: 'METAMASK',
+      description: 'Connect via MetaMask browser extension or mobile dApp.',
+      badge: 'EVM WEB3',
       renderIcon: () => (
         <div className="w-10 h-10 bg-black border border-[#FF6A00]/50 flex items-center justify-center p-1 shrink-0 overflow-hidden">
           <MetaMaskNeonFox className="w-full h-full" />
@@ -42,7 +57,7 @@ export const WalletModal: React.FC = () => {
     {
       id: 'walletconnect',
       name: 'WalletConnect',
-      description: 'Scan QR code with any mobile crypto wallet to connect instantly.',
+      description: 'Universal QR code connection for any mobile Web3 wallet.',
       badge: 'UNIVERSAL',
       renderIcon: () => (
         <div className="w-10 h-10 bg-[#3B99FC]/10 border border-[#3B99FC]/50 flex items-center justify-center p-2 shrink-0">
@@ -54,16 +69,59 @@ export const WalletModal: React.FC = () => {
     },
   ];
 
-  const handleSelectWallet = async (walletId: string) => {
+  const testContenders = [
+    {
+      name: 'Contender A (KrypToKnight)',
+      address: '0x71c4e8b109284091284091284091824091844e8b',
+      rating: '1640 XP',
+      role: 'Registered Contender',
+    },
+    {
+      name: 'Contender B (SnakeGrid99)',
+      address: '0x88f4902190184029184091284091824091849021',
+      rating: '1890 XP',
+      role: 'Registered Contender',
+    },
+    {
+      name: 'Deployer (Owner Admin)',
+      address: OWNER_ADMIN_WALLET,
+      rating: '2400 XP',
+      role: 'Owner Admin',
+    },
+  ];
+
+  const handleSelectWallet = async (walletId: string, customAddress?: string) => {
     sound.playClick();
     setConnectingId(walletId);
-    await connectWallet(walletId);
+    await connectWallet(walletId, customAddress);
+    setConnectingId(null);
+  };
+
+  const handleConnectCustom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const addr = customAddressInput.trim();
+    if (!addr.startsWith('0x') || addr.length < 10) return;
+    sound.playClick();
+    setConnectingId('custom');
+    await connectWallet('custom', addr);
+    setConnectingId(null);
+  };
+
+  const handleGenerateNewWallet = async () => {
+    sound.playClick();
+    // Generate a random valid-looking hex address to test brand-new onboarding
+    const randomHex = Array.from({ length: 40 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join('');
+    const newAddr = `0x${randomHex}`;
+    setConnectingId('new_wallet');
+    await connectWallet('custom', newAddr);
     setConnectingId(null);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 overflow-y-auto">
-      <div className="relative w-full max-w-md bg-[#080808] border border-white/20 p-5 sm:p-7 shadow-2xl space-y-5 my-auto max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-[#080808] border border-white/20 p-5 sm:p-7 shadow-2xl space-y-5 my-auto max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
@@ -75,7 +133,7 @@ export const WalletModal: React.FC = () => {
                 {isConnected ? 'Wallet Connected' : 'Connect Web3 Wallet'}
               </h2>
               <p className="text-[10px] text-white/40 uppercase font-bold tracking-[0.2em]">
-                X Layer • OKB Gas
+                X Layer • zkEVM Mainnet
               </p>
             </div>
           </div>
@@ -141,9 +199,12 @@ export const WalletModal: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            {/* Standard Wallet Providers */}
+          <div className="space-y-5">
+            {/* Standard Injected Wallet Providers */}
             <div className="space-y-2">
+              <span className="text-[10px] font-mono font-bold uppercase text-white/40 block">
+                1. Web3 Extension Gateways
+              </span>
               {walletProviders.map((w) => (
                 <button
                   key={w.id}
@@ -178,10 +239,80 @@ export const WalletModal: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            {/* Contender Multi-Account Switcher & Testing Flow */}
+            <div className="pt-2 border-t border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase text-white/40">
+                  2. Contender Account Switcher & Testing
+                </span>
+                <button
+                  onClick={() => setShowTesterAccounts(!showTesterAccounts)}
+                  className="text-[10px] font-mono text-[#CCFF00] uppercase hover:underline"
+                >
+                  {showTesterAccounts ? 'Hide' : 'Show'}
+                </button>
+              </div>
+
+              {showTesterAccounts && (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-1 gap-2">
+                    {testContenders.map((tc) => (
+                      <button
+                        key={tc.address}
+                        onClick={() => handleSelectWallet('custom', tc.address)}
+                        disabled={connectingId !== null}
+                        className="p-2.5 bg-black hover:bg-white/5 border border-white/10 hover:border-white/30 text-left transition flex items-center justify-between font-mono text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-white font-bold text-[11px] truncate">{tc.name}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 bg-white/10 text-white/60">
+                              {tc.role}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-white/40 block truncate">{tc.address}</span>
+                        </div>
+                        <span className="text-[#CCFF00] font-bold text-xs shrink-0 pl-2">
+                          {tc.rating}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Test New User Onboarding Button */}
+                  <button
+                    onClick={handleGenerateNewWallet}
+                    disabled={connectingId !== null}
+                    className="w-full py-2.5 bg-[#0A0A0A] hover:bg-white/10 border border-[#CCFF00]/40 hover:border-[#CCFF00] text-[#CCFF00] font-mono text-xs font-bold uppercase flex items-center justify-center space-x-2 transition"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Test Brand-New Wallet (Triggers Username Onboarding)</span>
+                  </button>
+
+                  {/* Custom 0x Address Input */}
+                  <form onSubmit={handleConnectCustom} className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Or enter any 0x... address"
+                      value={customAddressInput}
+                      onChange={(e) => setCustomAddressInput(e.target.value)}
+                      className="flex-1 bg-black border border-white/15 px-3 py-2 text-xs font-mono text-white placeholder-white/30 focus:outline-none focus:border-[#CCFF00]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!customAddressInput.startsWith('0x') || connectingId !== null}
+                      className="px-4 py-2 bg-white hover:bg-[#CCFF00] text-black font-black font-mono text-xs uppercase transition disabled:opacity-40"
+                    >
+                      Connect
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
     </div>
   );
 };
-

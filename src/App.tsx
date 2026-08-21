@@ -5,6 +5,7 @@ import { LiveTicker } from './components/LiveTicker';
 import { Footer } from './components/Footer';
 import { XSocialSection } from './components/XSocialSection';
 import { WalletModal } from './components/WalletModal';
+import { UsernameOnboardingModal } from './components/UsernameOnboardingModal';
 import { ForfeitModal } from './components/ForfeitModal';
 import { HomeView } from './components/views/HomeView';
 import { GamesView } from './components/views/GamesView';
@@ -66,6 +67,9 @@ const MainArenaContent: React.FC = () => {
 
       {/* 4. Global Web3 Modal */}
       <WalletModal />
+
+      {/* 4b. Mandatory First-Time Onboarding Modal */}
+      <UsernameOnboardingModal />
 
       {/* 5. Forfeit & Abandon Match Modal */}
       <ForfeitModal />

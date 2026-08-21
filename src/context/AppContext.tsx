@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import {
   UserProfile,
   AIAgent,
@@ -16,7 +16,6 @@ import {
   INITIAL_AI_AGENTS,
   INITIAL_EVENTS,
   INITIAL_CHALLENGES,
-  INITIAL_LEADERBOARD,
   INITIAL_ACHIEVEMENTS,
   INITIAL_MATCH_HISTORY,
   INITIAL_TRANSACTIONS,
@@ -32,8 +31,7 @@ import {
   subscribeUserMatches,
   saveUserProfile,
   fetchUserProfile,
-  subscribeLeaderboard,
-  updateLeaderboardScore,
+  subscribeAllUsers,
   generateRandomAvatar,
   claimUsername,
 } from '../lib/firestoreService';
@@ -69,6 +67,10 @@ interface AppContextType {
   isAdmin: boolean;
   isWalletModalOpen: boolean;
   setIsWalletModalOpen: (open: boolean) => void;
+  isOnboardingOpen: boolean;
+  setIsOnboardingOpen: (open: boolean) => void;
+  pendingWalletAddress: string | null;
+  completeOnboarding: (username: string, avatar: string) => Promise<void>;
   connectWallet: (walletName: string, customAddress?: string) => Promise<void>;
   disconnectWallet: () => void;
   claimFaucet: () => void;
@@ -87,6 +89,7 @@ interface AppContextType {
   setEvents: React.Dispatch<React.SetStateAction<ArenaEvent[]>>;
   challenges: Challenge[];
   setChallenges: React.Dispatch<React.SetStateAction<Challenge[]>>;
+  allUsers: UserProfile[];
   leaderboard: LeaderboardEntry[];
   achievements: Achievement[];
   matchHistory: MatchRecord[];
@@ -121,17 +124,28 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('xarena_user');
-    return saved ? JSON.parse(saved) : INITIAL_USER;
-  });
-
   const [isConnected, setIsConnected] = useState<boolean>(() => {
     const savedConnected = localStorage.getItem('xarena_connected');
     return savedConnected === 'true';
   });
 
+  const [user, setUser] = useState<UserProfile>(() => {
+    const savedConnected = localStorage.getItem('xarena_connected') === 'true';
+    const savedUser = localStorage.getItem('xarena_user');
+    if (savedConnected && savedUser) {
+      try {
+        return JSON.parse(savedUser);
+      } catch {
+        return INITIAL_USER;
+      }
+    }
+    return INITIAL_USER;
+  });
+
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
+  const [pendingWalletAddress, setPendingWalletAddress] = useState<string | null>(null);
+
   const [currentView, setCurrentView] = useState<string>('home');
   const [selectedGame, setSelectedGame] = useState<GameType>('chess');
   const [activeMode, setActiveMode] = useState<GameMode>('play');
@@ -152,18 +166,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     xpPenalty: 50,
     isRanked: false,
   });
-  
+
   const [aiAgents, setAiAgents] = useState<AIAgent[]>(INITIAL_AI_AGENTS);
   const [events, setEvents] = useState<ArenaEvent[]>(INITIAL_EVENTS);
   const [challenges, setChallenges] = useState<Challenge[]>(INITIAL_CHALLENGES);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(INITIAL_LEADERBOARD);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [achievements, setAchievements] = useState<Achievement[]>(INITIAL_ACHIEVEMENTS);
   const [matchHistory, setMatchHistory] = useState<MatchRecord[]>(INITIAL_MATCH_HISTORY);
   const [transactions, setTransactions] = useState<Web3Transaction[]>(INITIAL_TRANSACTIONS);
-  
+
   const [soundMuted, setSoundMuted] = useState<boolean>(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  
+
   const [activeEventToPlay, setActiveEventToPlay] = useState<ArenaEvent | null>(null);
   const [activeChallengeToPlay, setActiveChallengeToPlay] = useState<Challenge | null>(null);
   const [activeAiOpponent, setActiveAiOpponent] = useState<AIAgent | null>(null);
@@ -175,7 +189,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       user.walletAddress.trim().toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase()
   );
 
-  // Real-time Firestore synchronization for Events (Admin creations/deletions reflect immediately)
+  // Real-time Firestore synchronization for Events
   useEffect(() => {
     const unsubscribe = subscribeLiveEvents((liveEvents) => {
       setEvents(liveEvents || []);
@@ -183,19 +197,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore synchronization for Leaderboard
+  // Real-time Firestore synchronization for ALL Users in Central Database
   useEffect(() => {
-    const unsubscribe = subscribeLeaderboard((liveLeaderboard) => {
-      if (liveLeaderboard && liveLeaderboard.length > 0) {
-        setLeaderboard(liveLeaderboard);
-      }
+    const unsubscribe = subscribeAllUsers((usersList) => {
+      setAllUsers(usersList || []);
     });
     return () => unsubscribe();
   }, []);
 
+  // Convert all central database users into sorted Leaderboard Entries
+  const leaderboard = useMemo<LeaderboardEntry[]>(() => {
+    return allUsers.map((u, idx) => {
+      const chessPlayed = (u.chessStats?.wins || 0) + (u.chessStats?.losses || 0) + (u.chessStats?.draws || 0);
+      const chessWinRate = chessPlayed > 0 ? Math.round(((u.chessStats?.wins || 0) / chessPlayed) * 100) : 0;
+      return {
+        id: u.id || u.walletAddress,
+        rank: idx + 1,
+        userId: u.id || u.walletAddress,
+        username: u.username || 'Contender',
+        avatar: u.avatar || generateRandomAvatar(u.walletAddress),
+        walletAddress: u.walletAddress,
+        rating: u.chessRating || 1200,
+        wins: u.chessStats?.wins || 0,
+        losses: u.chessStats?.losses || 0,
+        winRate: chessWinRate,
+        tier: u.chessTier || 'Bronze',
+        bestScore: u.bestScore2048 || 0,
+        highestTile: u.stats2048?.highestTile || 0,
+        prizesWonUsdc: u.totalPrizesWonUsdc || u.balanceUsdc || 0,
+      };
+    });
+  }, [allUsers]);
+
   // Real-time Firestore synchronization for User Match History
   useEffect(() => {
-    if (!user.walletAddress) {
+    if (!isConnected || !user.walletAddress) {
       setMatchHistory([]);
       return;
     }
@@ -203,20 +239,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setMatchHistory(records || []);
     });
     return () => unsubscribe();
-  }, [user.walletAddress]);
+  }, [isConnected, user.walletAddress]);
 
   // Sync and persist user session state
   useEffect(() => {
-    // Keep user.isAdmin strictly synchronized with owner wallet check
-    if (user.isAdmin !== isOwnerAdmin) {
-      setUser((prev) => ({ ...prev, isAdmin: isOwnerAdmin }));
-    }
-    localStorage.setItem('xarena_user', JSON.stringify({ ...user, isAdmin: isOwnerAdmin }));
-    localStorage.setItem('xarena_connected', isConnected ? 'true' : 'false');
-    
-    // Save to Firestore when connected
     if (isConnected && user.walletAddress) {
-      saveUserProfile({ ...user, isAdmin: isOwnerAdmin });
+      const updatedUser = { ...user, isAdmin: isOwnerAdmin };
+      localStorage.setItem('xarena_user', JSON.stringify(updatedUser));
+      localStorage.setItem('xarena_connected', 'true');
+      saveUserProfile(updatedUser);
+    } else {
+      localStorage.removeItem('xarena_connected');
+      localStorage.removeItem('xarena_user');
     }
   }, [user, isConnected, isOwnerAdmin]);
 
@@ -236,7 +270,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }));
         }
       } catch (err) {
-        console.warn('Background on-chain balance sync error:', err);
+        console.warn('Background on-chain balance sync notice:', err);
       }
     };
 
@@ -255,14 +289,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const showToast = (message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
-    const id = `toast_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
   };
 
-  // Safe Web3 Connection with MetaMask, OKX, WalletConnect & Owner Fast-Connect
+  /**
+   * Connect Web3 Wallet: Detects Existing vs New Users
+   */
   const connectWallet = async (walletName: string, customAddress?: string) => {
     try {
       let resolvedAddress = customAddress;
@@ -299,10 +335,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('On-chain balance fetch notice:', e);
       }
 
-      // Try load existing Firestore profile
+      // Check central Firestore database for existing user profile
       const existingProfile = await fetchUserProfile(resolvedAddress);
 
       if (existingProfile) {
+        // Existing user -> Restore profile directly
         const updated: UserProfile = {
           ...existingProfile,
           walletAddress: resolvedAddress,
@@ -311,63 +348,106 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (existingProfile.balanceUsdc || (isOwner ? 1000.0 : 0.0)),
         };
         setUser(updated);
-        saveUserProfile(updated);
+        setIsConnected(true);
+        setIsWalletModalOpen(false);
+        setIsOnboardingOpen(false);
+        setPendingWalletAddress(null);
+        await saveUserProfile(updated);
+        showToast(
+          isOwner
+            ? `Owner Admin Verified: ${displayAddr}`
+            : `Welcome back, ${updated.username}! Connected: ${displayAddr}`,
+          'success'
+        );
       } else {
-        // Brand new contender joining: zero initial stats, fresh unique avatar
-        const randomAvatar = generateRandomAvatar(resolvedAddress);
-        const defaultUsername = isOwner ? 'X Arena Deployer (Admin)' : `Contender_${resolvedAddress.slice(2, 6)}`;
-        const freshUser: UserProfile = {
-          id: `usr_${resolvedAddress.toLowerCase()}`,
-          walletAddress: resolvedAddress,
-          username: defaultUsername,
-          avatar: randomAvatar,
-          title: isOwner ? 'Deployer & Arbiter' : 'Arena Contender',
-          bio: 'Competitive contender on X Layer zkEVM.',
-          joinedDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (isOwner ? 1000.0 : 0.0),
-          balanceOkb: onChainOkb > 0 ? onChainOkb : (isOwner ? 25.0 : 0.0),
-          totalPrizesWonUsdc: 0,
-          globalRank: isOwner ? 1 : 0,
-          chessRating: 1200,
-          chessPeakRating: 1200,
-          chessTier: 'Bronze',
-          chessStats: { wins: 0, losses: 0, draws: 0, streak: 0 },
-          score2048Rating: 1200,
-          score2048PeakRating: 1200,
-          bestScore2048: 0,
-          stats2048: { gamesPlayed: 0, wins2048: 0, highestTile: 0, streak: 0 },
-          achievements: [],
-          isCreator: false,
-          isAdmin: isOwner,
-        };
-        setUser(freshUser);
-        await saveUserProfile(freshUser);
-        await claimUsername(defaultUsername, undefined, resolvedAddress);
+        // New user -> Open mandatory Username Onboarding Flow
+        setIsWalletModalOpen(false);
+        setPendingWalletAddress(resolvedAddress);
+        setIsOnboardingOpen(true);
+        sound.playNotification();
       }
-
-      setIsConnected(true);
-      setIsWalletModalOpen(false);
-      showToast(
-        isOwner
-          ? `Owner Admin Verified: ${displayAddr}`
-          : `Connected: ${displayAddr} on X Layer zkEVM!`,
-        'success'
-      );
     } catch (err: any) {
       console.warn('Web3 connection notice:', err);
       showToast(err?.message || 'Wallet connection was cancelled or rejected.', 'error');
     }
   };
 
-  // Custom Username & Avatar Updater with Firestore Reservation
+  /**
+   * Complete First-Time Username Onboarding Flow
+   */
+  const completeOnboarding = async (chosenUsername: string, chosenAvatar: string) => {
+    if (!pendingWalletAddress) return;
+
+    const resolvedAddress = pendingWalletAddress;
+    const isOwner = resolvedAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
+    const displayAddr = `${resolvedAddress.slice(0, 6)}...${resolvedAddress.slice(-4)}`;
+
+    let onChainOkb = isOwner ? 25.0 : 0.0;
+    let onChainUsdc = isOwner ? 1000.0 : 0.0;
+    try {
+      const onChain = await fetchOnChainBalances(resolvedAddress);
+      if (onChain.isLive) {
+        onChainOkb = onChain.okb;
+        onChainUsdc = onChain.usdc;
+      }
+    } catch (e) {
+      console.warn('On-chain balance check notice:', e);
+    }
+
+    // 1. Claim username in registry
+    const claimRes = await claimUsername(chosenUsername, undefined, resolvedAddress);
+    if (!claimRes.success) {
+      throw new Error(claimRes.error || 'Failed to claim username.');
+    }
+
+    // 2. Create fresh UserProfile document in central users collection
+    const newUser: UserProfile = {
+      id: `usr_${resolvedAddress.toLowerCase()}`,
+      walletAddress: resolvedAddress,
+      username: chosenUsername,
+      avatar: chosenAvatar || generateRandomAvatar(resolvedAddress),
+      title: isOwner ? 'Deployer & Arbiter' : 'Arena Contender',
+      bio: 'Competitive contender on X Layer zkEVM.',
+      joinedDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (isOwner ? 1000.0 : 0.0),
+      balanceOkb: onChainOkb > 0 ? onChainOkb : (isOwner ? 25.0 : 0.0),
+      totalPrizesWonUsdc: 0,
+      globalRank: isOwner ? 1 : 0,
+      chessRating: 1200,
+      chessPeakRating: 1200,
+      chessTier: 'Bronze',
+      chessStats: { wins: 0, losses: 0, draws: 0, streak: 0 },
+      score2048Rating: 1200,
+      score2048PeakRating: 1200,
+      bestScore2048: 0,
+      tier2048: 'Bronze',
+      stats2048: { gamesPlayed: 0, wins2048: 0, highestTile: 0, streak: 0 },
+      achievements: [],
+      isCreator: false,
+      isAdmin: isOwner,
+    };
+
+    await saveUserProfile(newUser);
+    setUser(newUser);
+    setIsConnected(true);
+    setIsOnboardingOpen(false);
+    setPendingWalletAddress(null);
+
+    sound.playVictory();
+    showToast(`Profile created! Welcome to X Arena, ${chosenUsername}!`, 'success');
+  };
+
+  /**
+   * Custom Profile Updater
+   */
   const updateUserIdentity = async (
     newUsername: string,
     newAvatar: string,
     newBio?: string
   ): Promise<{ success: boolean; error?: string }> => {
     const trimmed = newUsername.trim();
-    if (trimmed.length < 3 || trimmed.length > 24) {
-      return { success: false, error: 'Username must be between 3 and 24 characters.' };
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      return { success: false, error: 'Username must be between 3 and 20 characters.' };
     }
 
     const claimRes = await claimUsername(trimmed, user.username, user.walletAddress);
@@ -383,8 +463,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setUser(updatedUser);
-    localStorage.setItem('xarena_user', JSON.stringify(updatedUser));
-
     if (user.walletAddress) {
       await saveUserProfile(updatedUser);
     }
@@ -392,37 +470,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
+  /**
+   * Disconnect Wallet: Safely clears active session UI without deleting stored DB data
+   */
   const disconnectWallet = () => {
     setIsConnected(false);
-    setUser((prev) => ({
-      ...prev,
-      isAdmin: false,
-    }));
-    if (currentView === 'admin') {
+    setUser(INITIAL_USER);
+    setIsOnboardingOpen(false);
+    setPendingWalletAddress(null);
+    localStorage.removeItem('xarena_connected');
+    localStorage.removeItem('xarena_user');
+    if (currentView === 'admin' || currentView === 'profile') {
       setCurrentView('home');
     }
-    showToast('Wallet disconnected. Switched to public guest mode.', 'info');
+    showToast('Wallet disconnected. Switched to guest mode.', 'info');
   };
 
-  // Safe Navigation Guard: Intercepts view change if user is in an active match
+  // Safe Navigation Guard
   const requestNavigate = (targetViewId: string) => {
     if (targetViewId === currentView) return;
 
-    // Check if in an active game session with moves
     const isGameView = currentView === 'chess' || currentView === '2048';
     if (isGameView && gameSession.isActive && !gameSession.isGameOver && gameSession.movesCount > 0) {
       promptForfeit(targetViewId);
       return;
     }
 
-    // Otherwise navigate immediately
     sound.playClick();
     setCurrentView(targetViewId);
   };
 
   const promptForfeit = (targetView: string | null, customCallback?: () => void) => {
     const isRanked = activeMode === 'ranked' || gameSession.mode === 'ranked';
-    // Double XP loss penalty for forfeiting in ranked
     const xpPenalty = isRanked ? (selectedGame === 'chess' ? 50 : 60) : 0;
 
     setForfeitModalState({
@@ -440,11 +519,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const game = selectedGame;
 
     if (isRanked && penalty > 0) {
-      // Deduct 2x XP loss for forfeiting
       setUser((prev) => {
+        let updated: UserProfile;
         if (game === 'chess') {
           const newRating = Math.max(400, prev.chessRating - penalty);
-          return {
+          updated = {
             ...prev,
             chessRating: newRating,
             chessTier: getChessTier(newRating),
@@ -456,50 +535,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         } else {
           const newRating = Math.max(400, prev.score2048Rating - penalty);
-          return {
+          updated = {
             ...prev,
             score2048Rating: newRating,
             stats2048: {
               ...prev.stats2048,
-              gamesPlayed: prev.stats2048.gamesPlayed + 1,
               streak: 0,
             },
           };
         }
+        if (prev.walletAddress) {
+          saveUserProfile(updated);
+        }
+        return updated;
       });
-
-      // Record forfeit loss in match history
-      const forfeitRecord: MatchRecord = {
-        id: `match_forfeit_${Date.now()}`,
-        game,
-        mode: 'ranked',
-        date: 'Just now',
-        opponentName: 'Match Abandoned (Forfeit)',
-        isAiOpponent: false,
-        result: 'loss',
-        ratingDelta: -penalty,
-        movesCount: gameSession.movesCount,
-        durationSeconds: 30,
-      };
-      setMatchHistory((prev) => [forfeitRecord, ...prev]);
-
-      showToast(`Match Forfeited! Incurred -${penalty} XP penalty (2x Loss).`, 'error');
-      sound.playDefeat();
-    } else {
-      showToast('Game session abandoned.', 'info');
+      showToast(`Ranked Match Forfeited: -${penalty} XP penalty applied.`, 'error');
     }
 
-    // Reset game session
     setGameSession({
       isActive: false,
       game: null,
       mode: 'play',
       movesCount: 0,
-      isGameOver: true,
+      isGameOver: false,
     });
 
     const target = forfeitModalState.targetView;
-    const callback = forfeitModalState.onConfirmCallback;
+    const cb = forfeitModalState.onConfirmCallback;
 
     setForfeitModalState({
       isOpen: false,
@@ -508,11 +570,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isRanked: false,
     });
 
-    if (callback) {
-      callback();
-    } else if (target) {
-      setCurrentView(target);
-    }
+    if (cb) cb();
+    if (target) setCurrentView(target);
   };
 
   const cancelForfeit = () => {
@@ -522,178 +581,185 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       xpPenalty: 0,
       isRanked: false,
     });
-    showToast('Match resumed. Continue fighting for victory!', 'info');
   };
 
   const claimFaucet = () => {
-    setUser((prev) => ({
-      ...prev,
-      balanceUsdc: prev.balanceUsdc + 50.0,
-      balanceOkb: prev.balanceOkb + 1.0,
-    }));
-    const newTx: Web3Transaction = {
-      id: `tx_${Date.now()}`,
-      hash: `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`,
-      type: 'faucet',
-      amountUsdc: 50.0,
-      currency: 'USDC',
-      status: 'confirmed',
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      description: 'X Layer Faucet Claim (+50 USDC, +1 OKB)',
-      explorerUrl: 'https://www.oklink.com/xlayer',
-    };
-    setTransactions((prev) => [newTx, ...prev]);
-    showToast('Claimed 50.0 USDC & 1.0 OKB from X Layer Faucet!', 'success');
-    sound.playVictory();
+    if (!isConnected) {
+      setIsWalletModalOpen(true);
+      return;
+    }
+    setUser((prev) => {
+      const updated = {
+        ...prev,
+        balanceUsdc: prev.balanceUsdc + 250,
+        balanceOkb: prev.balanceOkb + 0.05,
+      };
+      if (prev.walletAddress) {
+        saveUserProfile(updated);
+      }
+      return updated;
+    });
+    sound.playCash();
+    showToast('Faucet Claimed: +250 USDC & +0.05 OKB gas!', 'success');
   };
 
-  const addMatchRecord = (record: Omit<MatchRecord, 'id' | 'date'>) => {
+  const addMatchRecord = (recordData: Omit<MatchRecord, 'id' | 'date'>) => {
     const newRecord: MatchRecord = {
-      ...record,
+      ...recordData,
       id: `match_${Date.now()}`,
-      date: new Date().toISOString(),
+      date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setMatchHistory((prev) => [newRecord, ...prev]);
+    setMatchHistory((prev) => [newRecord, ...prev.slice(0, 49)]);
 
-    // Persist match directly to Firestore
     if (user.walletAddress) {
       saveFirestoreMatchRecord(newRecord, user.walletAddress);
     }
 
-    // Update user stats & ratings
+    // Update user stats and sync to Firestore
     setUser((prev) => {
-      if (record.game === 'chess') {
-        const newRating = Math.max(400, prev.chessRating + record.ratingDelta);
+      let updated: UserProfile = { ...prev };
+      if (recordData.game === 'chess') {
+        const isWin = recordData.result === 'win';
+        const isLoss = recordData.result === 'loss';
+        const isDraw = recordData.result === 'draw';
+        const newRating = Math.max(400, prev.chessRating + recordData.ratingDelta);
         const newPeak = Math.max(prev.chessPeakRating, newRating);
-        const wins = record.result === 'win' ? prev.chessStats.wins + 1 : prev.chessStats.wins;
-        const losses = record.result === 'loss' ? prev.chessStats.losses + 1 : prev.chessStats.losses;
-        const draws = record.result === 'draw' ? prev.chessStats.draws + 1 : prev.chessStats.draws;
-        const streak = record.result === 'win' ? prev.chessStats.streak + 1 : 0;
-        
-        return {
+
+        updated = {
           ...prev,
           chessRating: newRating,
           chessPeakRating: newPeak,
           chessTier: getChessTier(newRating),
-          chessStats: { wins, losses, draws, streak },
-          balanceUsdc: prev.balanceUsdc + (record.rewardsEarnedUsdc || 0),
-          totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (record.rewardsEarnedUsdc || 0),
+          chessStats: {
+            wins: prev.chessStats.wins + (isWin ? 1 : 0),
+            losses: prev.chessStats.losses + (isLoss ? 1 : 0),
+            draws: prev.chessStats.draws + (isDraw ? 1 : 0),
+            streak: isWin ? prev.chessStats.streak + 1 : 0,
+          },
+          balanceUsdc: prev.balanceUsdc + (recordData.rewardsEarnedUsdc || 0),
+          totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (recordData.rewardsEarnedUsdc || 0),
         };
-      } else {
-        const newRating = Math.max(400, prev.score2048Rating + record.ratingDelta);
+      } else if (recordData.game === '2048') {
+        const isWin = recordData.result === 'win';
+        const newRating = Math.max(400, prev.score2048Rating + recordData.ratingDelta);
         const newPeak = Math.max(prev.score2048PeakRating, newRating);
-        const bestScore = Math.max(prev.bestScore2048, record.playerScore || 0);
-        const maxTile = Math.max(prev.stats2048.highestTile, record.highestTile || 0);
-        const wins2048 = (record.highestTile || 0) >= 2048 ? prev.stats2048.wins2048 + 1 : prev.stats2048.wins2048;
-        const streak = (record.highestTile || 0) >= 2048 ? prev.stats2048.streak + 1 : prev.stats2048.streak;
+        const newBestScore = Math.max(prev.bestScore2048, recordData.playerScore || 0);
+        const newHighestTile = Math.max(prev.stats2048.highestTile, recordData.highestTile || 0);
 
-        return {
+        updated = {
           ...prev,
           score2048Rating: newRating,
           score2048PeakRating: newPeak,
-          bestScore2048: bestScore,
+          bestScore2048: newBestScore,
           stats2048: {
             gamesPlayed: prev.stats2048.gamesPlayed + 1,
-            wins2048,
-            highestTile: maxTile,
-            streak,
+            wins2048: prev.stats2048.wins2048 + (isWin ? 1 : 0),
+            highestTile: newHighestTile,
+            streak: isWin ? prev.stats2048.streak + 1 : 0,
           },
-          balanceUsdc: prev.balanceUsdc + (record.rewardsEarnedUsdc || 0),
-          totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (record.rewardsEarnedUsdc || 0),
+          balanceUsdc: prev.balanceUsdc + (recordData.rewardsEarnedUsdc || 0),
+          totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (recordData.rewardsEarnedUsdc || 0),
         };
       }
-    });
 
-    if (record.result === 'win') {
-      sound.playVictory();
-    }
+      if (prev.walletAddress) {
+        saveUserProfile(updated);
+      }
+      return updated;
+    });
   };
 
   const joinEvent = (eventId: string): boolean => {
-    const targetEvent = events.find((e) => e.id === eventId);
-    if (!targetEvent) return false;
-
-    // Check if already registered
-    const alreadyJoined = targetEvent.participants.some((p) => p.userId === user.id);
-    if (alreadyJoined) {
-      showToast('You are already registered for this event! Good luck in the arena.', 'info');
-      return true;
-    }
-
-    if (targetEvent.entryFeeUsdc > 0 && user.balanceUsdc < targetEvent.entryFeeUsdc) {
-      showToast(`Insufficient balance (${user.balanceUsdc} USDC). Use Faucet or deposit USDC.`, 'error');
+    if (!isConnected) {
+      setIsWalletModalOpen(true);
       return false;
     }
 
-    // Deduct entry fee
-    if (targetEvent.entryFeeUsdc > 0) {
-      setUser((prev) => ({
-        ...prev,
-        balanceUsdc: prev.balanceUsdc - targetEvent.entryFeeUsdc,
-      }));
+    const event = events.find((e) => e.id === eventId);
+    if (!event) return false;
 
-      const newTx: Web3Transaction = {
-        id: `tx_${Date.now()}`,
-        hash: `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`,
-        type: 'event_entry',
-        amountUsdc: targetEvent.entryFeeUsdc,
-        currency: 'USDC',
-        status: 'confirmed',
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        description: `Entry Fee: ${targetEvent.title}`,
-        explorerUrl: 'https://www.oklink.com/xlayer',
-      };
-      setTransactions((prev) => [newTx, ...prev]);
+    if (user.balanceUsdc < event.entryFeeUsdc) {
+      showToast(`Insufficient USDC. Event requires $${event.entryFeeUsdc} USDC.`, 'error');
+      return false;
     }
 
-    // Add to participants
-    const updatedEvent: ArenaEvent = {
-      ...targetEvent,
-      currentParticipantsCount: targetEvent.currentParticipantsCount + 1,
-      participants: [
-        ...targetEvent.participants,
-        {
-          userId: user.id,
-          username: user.username,
-          avatar: user.avatar,
-          walletAddress: user.walletAddress,
-          score: 0,
-          rank: targetEvent.participants.length + 1,
-          joinedAt: new Date().toISOString(),
-        },
-      ],
-    };
-
-    setEvents((prev) =>
-      prev.map((ev) => (ev.id === eventId ? updatedEvent : ev))
-    );
-
-    saveLiveEvent(updatedEvent).catch((err) => {
-      console.warn('Firestore update event on join error:', err);
+    setUser((prev) => {
+      const updated = {
+        ...prev,
+        balanceUsdc: prev.balanceUsdc - event.entryFeeUsdc,
+      };
+      if (prev.walletAddress) {
+        saveUserProfile(updated);
+      }
+      return updated;
     });
 
-    showToast(`Successfully registered for ${targetEvent.title}! Entry confirmed on X Layer.`, 'success');
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e.id === eventId) {
+          const isAlreadyIn = e.participants.some((p) => p.userId === user.id || p.walletAddress === user.walletAddress);
+          if (isAlreadyIn) return e;
+
+          const updatedParticipants = [
+            ...e.participants,
+            {
+              userId: user.id,
+              username: user.username,
+              avatar: user.avatar,
+              walletAddress: user.walletAddress,
+              score: 0,
+              rank: e.participants.length + 1,
+              joinedAt: new Date().toISOString(),
+            },
+          ];
+
+          const updatedEvent: ArenaEvent = {
+            ...e,
+            currentParticipantsCount: updatedParticipants.length,
+            participants: updatedParticipants,
+            isUserRegistered: true,
+          };
+
+          saveLiveEvent(updatedEvent).catch((err) => {
+            console.warn('Firestore event update notice:', err);
+          });
+
+          return updatedEvent;
+        }
+        return e;
+      })
+    );
+
+    showToast(`Joined "${event.title}"! Good luck contender.`, 'success');
     sound.playVictory();
     return true;
   };
 
   const completeChallenge = (challengeId: string) => {
-    const chal = challenges.find((c) => c.id === challengeId);
-    if (!chal || chal.completed) return;
-
     setChallenges((prev) =>
-      prev.map((c) => (c.id === challengeId ? { ...c, completed: true } : c))
+      prev.map((c) => {
+        if (c.id === challengeId && !c.completed) {
+          setUser((u) => {
+            const updated = {
+              ...u,
+              balanceUsdc: u.balanceUsdc + c.rewardUsdc,
+              totalPrizesWonUsdc: u.totalPrizesWonUsdc + c.rewardUsdc,
+              chessRating: c.game === 'chess' ? u.chessRating + c.rewardXp : u.chessRating,
+              score2048Rating: c.game === '2048' ? u.score2048Rating + c.rewardXp : u.score2048Rating,
+            };
+            if (u.walletAddress) {
+              saveUserProfile(updated);
+            }
+            return updated;
+          });
+          showToast(`Challenge Completed! +${c.rewardXp} XP & +$${c.rewardUsdc} USDC`, 'success');
+          sound.playVictory();
+          return { ...c, completed: true };
+        }
+        return c;
+      })
     );
-
-    setUser((prev) => ({
-      ...prev,
-      balanceUsdc: prev.balanceUsdc + chal.rewardUsdc,
-      totalPrizesWonUsdc: prev.totalPrizesWonUsdc + chal.rewardUsdc,
-    }));
-
-    showToast(`Challenge Completed! Claimed +${chal.rewardUsdc} USDC & +${chal.rewardXp} XP.`, 'success');
-    sound.playVictory();
   };
 
   const claimAchievementReward = (achievementId: string) => {
@@ -701,12 +767,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!ach) return;
 
     if (!user.achievements.includes(ach.id)) {
-      setUser((prev) => ({
-        ...prev,
-        achievements: [...prev.achievements, ach.id],
-        balanceUsdc: prev.balanceUsdc + (ach.rewardUsdc || 0),
-        totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (ach.rewardUsdc || 0),
-      }));
+      setUser((prev) => {
+        const updated = {
+          ...prev,
+          achievements: [...prev.achievements, ach.id],
+          balanceUsdc: prev.balanceUsdc + (ach.rewardUsdc || 0),
+          totalPrizesWonUsdc: prev.totalPrizesWonUsdc + (ach.rewardUsdc || 0),
+        };
+        if (prev.walletAddress) {
+          saveUserProfile(updated);
+        }
+        return updated;
+      });
       showToast(`Achievement Unlocked: Claimed +$${ach.rewardUsdc} USDC for "${ach.title}"!`, 'success');
       sound.playVictory();
     }
@@ -754,9 +826,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setEvents((prev) => [fullEvent, ...prev]);
-    // Save live event to Firestore
     saveLiveEvent(fullEvent).catch((err) => {
-      console.warn('Firestore event save error:', err);
+      console.warn('Firestore event save notice:', err);
     });
     showToast(`Created event "${fullEvent.title}" on X Layer!`, 'success');
     sound.playVictory();
@@ -802,6 +873,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isAdmin: isOwnerAdmin,
         isWalletModalOpen,
         setIsWalletModalOpen,
+        isOnboardingOpen,
+        setIsOnboardingOpen,
+        pendingWalletAddress,
+        completeOnboarding,
         connectWallet,
         disconnectWallet,
         claimFaucet,
@@ -820,6 +895,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEvents,
         challenges,
         setChallenges,
+        allUsers,
         leaderboard,
         achievements,
         matchHistory,

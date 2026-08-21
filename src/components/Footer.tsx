@@ -27,7 +27,7 @@ export const Footer: React.FC = () => {
           </div>
           <div className="pt-2">
             <a
-              href="https://x.com"
+              href="https://x.com/XArena_Protocol"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center space-x-2 text-xs font-mono text-white/70 hover:text-[#CCFF00] transition"

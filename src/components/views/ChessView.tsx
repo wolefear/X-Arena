@@ -20,21 +20,7 @@ import {
 } from 'lucide-react';
 import { sound } from '../../utils/audio';
 import { calculateChessXpDelta } from '../../utils/elo';
-
-const PIECE_UNICODE: Record<string, string> = {
-  p: '♟',
-  r: '♜',
-  n: '♞',
-  b: '♝',
-  q: '♛',
-  k: '♚',
-  P: '♙',
-  R: '♖',
-  N: '♘',
-  B: '♗',
-  Q: '♕',
-  K: '♔',
-};
+import { ChessPiece } from '../game/ChessPiece';
 
 export const ChessView: React.FC = () => {
   const {
@@ -676,17 +662,19 @@ export const ChessView: React.FC = () => {
                           <div className="w-3 sm:w-4 h-3 sm:h-4 rounded-full bg-[#CCFF00] shadow-md border border-black/40" />
                         )}
 
-                        {/* High-Contrast Chess Piece Display */}
+                        {/* Consistent Staunton Chess Piece Display */}
                         {piece && (
-                          <span
-                            className={`transition-transform select-none ${
-                              piece.color === 'w'
-                                ? 'text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] filter brightness-110'
-                                : 'text-[#0F172A] drop-shadow-[0_0_2px_#CCFF00] drop-shadow-[0_0_1px_#FFFFFF] filter contrast-125'
-                            } ${isSelected ? 'scale-115' : 'hover:scale-105'}`}
+                          <div
+                            className={`w-[82%] h-[82%] flex items-center justify-center transition-transform select-none ${
+                              isSelected ? 'scale-110 -translate-y-0.5' : 'hover:scale-105'
+                            }`}
                           >
-                            {PIECE_UNICODE[piece.color === 'w' ? piece.type.toUpperCase() : piece.type]}
-                          </span>
+                            <ChessPiece
+                              type={piece.type}
+                              color={piece.color}
+                              className="w-full h-full drop-shadow-md"
+                            />
+                          </div>
                         )}
                       </div>
                     );

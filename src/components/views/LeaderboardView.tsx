@@ -10,83 +10,120 @@ import {
   TrendingUp,
   ShieldCheck,
   CheckCircle2,
+  RefreshCw,
+  Crown,
+  Medal,
 } from 'lucide-react';
 import { sound } from '../../utils/audio';
 
 export const LeaderboardView: React.FC = () => {
-  const { leaderboard, user, isConnected } = useApp();
+  const { allUsers, user, isConnected } = useApp();
   const [tab, setTab] = useState<'chess' | '2048'>('chess');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Dynamically include current user with live XP in the leaderboard list
-  const consolidatedList = useMemo(() => {
-    // Clone existing leaderboard items
-    const list = [...leaderboard];
+  // Global Leaderboard computation from ALL registered database users
+  const rankedUsers = useMemo(() => {
+    // Clone all database users
+    const list = allUsers.map((u) => {
+      const isCurr = Boolean(
+        isConnected &&
+          user.walletAddress &&
+          u.walletAddress?.toLowerCase() === user.walletAddress.toLowerCase()
+      );
 
-    // Find if user already exists
-    const userIndex = list.findIndex(
-      (item) =>
-        item.userId === user.id ||
-        (user.walletAddress && item.walletAddress?.toLowerCase() === user.walletAddress.toLowerCase()) ||
-        item.username.toLowerCase() === user.username.toLowerCase()
-    );
+      const chessPlayed =
+        (u.chessStats?.wins || 0) + (u.chessStats?.losses || 0) + (u.chessStats?.draws || 0);
+      const chessWinRate =
+        chessPlayed > 0 ? Math.round(((u.chessStats?.wins || 0) / chessPlayed) * 100) : 0;
 
-    const userEntry = {
-      id: user.id || 'current_user',
-      userId: user.id || 'current_user',
-      username: user.username,
-      avatar: user.avatar,
-      walletAddress: user.walletAddress,
-      chessRating: user.chessRating,
-      score2048Rating: user.score2048Rating,
-      tier: tab === '2048' ? user.tier2048 : user.chessTier,
-      winRate:
-        tab === '2048'
-          ? 74
-          : user.chessStats.played > 0
-          ? Math.round((user.chessStats.wins / user.chessStats.played) * 100)
-          : 68,
-      prizesWonUsdc: user.balanceUsdc || 150,
-      matchesPlayed: tab === '2048' ? user.stats2048.gamesPlayed : user.chessStats.played || 14,
-      isCurrentUser: true,
-    };
+      const games2048 = u.stats2048?.gamesPlayed || 0;
+      const winRate2048 =
+        games2048 > 0 ? Math.round(((u.stats2048?.wins2048 || 0) / games2048) * 100) : 0;
 
-    if (userIndex >= 0) {
-      list[userIndex] = {
-        ...list[userIndex],
-        ...userEntry,
-        // Ensure tier is never "ADMIN"
-        tier: tab === '2048' ? user.tier2048 : user.chessTier,
+      return {
+        id: u.id || u.walletAddress,
+        userId: u.id || u.walletAddress,
+        username: u.username || 'Contender',
+        avatar: u.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=xarena',
+        walletAddress: u.walletAddress,
+        chessRating: u.chessRating ?? 1200,
+        chessTier: u.chessTier || 'Bronze',
+        chessWins: u.chessStats?.wins || 0,
+        chessPlayed,
+        chessWinRate,
+        score2048Rating: u.score2048Rating ?? 1200,
+        tier2048: u.tier2048 || 'Bronze',
+        bestScore2048: u.bestScore2048 || 0,
+        highestTile: u.stats2048?.highestTile || 0,
+        games2048,
+        winRate2048,
+        prizesWonUsdc: u.totalPrizesWonUsdc || u.balanceUsdc || 0,
+        isCurrentUser: isCurr,
       };
-    } else {
-      list.push(userEntry);
+    });
+
+    // If current logged-in user is not yet in allUsers array (optimistic fallback)
+    if (
+      isConnected &&
+      user.walletAddress &&
+      !list.some((item) => item.walletAddress?.toLowerCase() === user.walletAddress.toLowerCase())
+    ) {
+      const chessPlayed =
+        (user.chessStats?.wins || 0) + (user.chessStats?.losses || 0) + (user.chessStats?.draws || 0);
+      const chessWinRate =
+        chessPlayed > 0 ? Math.round(((user.chessStats?.wins || 0) / chessPlayed) * 100) : 0;
+      const games2048 = user.stats2048?.gamesPlayed || 0;
+      const winRate2048 =
+        games2048 > 0 ? Math.round(((user.stats2048?.wins2048 || 0) / games2048) * 100) : 0;
+
+      list.push({
+        id: user.id || user.walletAddress,
+        userId: user.id || user.walletAddress,
+        username: user.username,
+        avatar: user.avatar,
+        walletAddress: user.walletAddress,
+        chessRating: user.chessRating ?? 1200,
+        chessTier: user.chessTier || 'Bronze',
+        chessWins: user.chessStats?.wins || 0,
+        chessPlayed,
+        chessWinRate,
+        score2048Rating: user.score2048Rating ?? 1200,
+        tier2048: user.tier2048 || 'Bronze',
+        bestScore2048: user.bestScore2048 || 0,
+        highestTile: user.stats2048?.highestTile || 0,
+        games2048,
+        winRate2048,
+        prizesWonUsdc: user.totalPrizesWonUsdc || user.balanceUsdc || 0,
+        isCurrentUser: true,
+      });
     }
 
-    return list;
-  }, [leaderboard, user, tab]);
-
-  // Human / competitive leaderboard for Chess and 2048 sorted by XP
-  const filteredList = useMemo(() => {
-    return consolidatedList
-      .filter((item) => {
-        if (tab === 'chess' && item.chessRating === undefined) return false;
-        if (tab === '2048' && item.score2048Rating === undefined) return false;
-
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          return (
-            item.username.toLowerCase().includes(q) ||
-            (item.walletAddress && item.walletAddress.toLowerCase().includes(q))
-          );
+    // Sort strictly by the selected game rating metric
+    return list.sort((a, b) => {
+      if (tab === 'chess') {
+        if (b.chessRating !== a.chessRating) {
+          return b.chessRating - a.chessRating;
         }
-        return true;
-      })
-      .sort((a, b) => {
-        const scoreA = tab === '2048' ? (a.score2048Rating || 0) : (a.chessRating || 0);
-        const scoreB = tab === '2048' ? (b.score2048Rating || 0) : (b.chessRating || 0);
-        return scoreB - scoreA;
-      });
-  }, [consolidatedList, tab, searchQuery]);
+        return b.chessWins - a.chessWins;
+      } else {
+        if (b.score2048Rating !== a.score2048Rating) {
+          return b.score2048Rating - a.score2048Rating;
+        }
+        return b.bestScore2048 - a.bestScore2048;
+      }
+    });
+  }, [allUsers, user, isConnected, tab]);
+
+  // Filter with search query
+  const filteredList = useMemo(() => {
+    if (!searchQuery.trim()) return rankedUsers;
+    const q = searchQuery.toLowerCase();
+    return rankedUsers.filter(
+      (item) =>
+        item.username.toLowerCase().includes(q) ||
+        (item.walletAddress && item.walletAddress.toLowerCase().includes(q))
+    );
+  }, [rankedUsers, searchQuery]);
 
   const top3 = filteredList.slice(0, 3);
 
@@ -96,13 +133,13 @@ export const LeaderboardView: React.FC = () => {
       <div>
         <div className="flex items-center space-x-2 text-xs font-bold text-[#CCFF00] uppercase tracking-[0.2em] sm:tracking-[0.3em]">
           <Award className="w-4 h-4 shrink-0" />
-          <span>Apex Rankings & Hall of Fame</span>
+          <span>Apex Rankings & Central Hall of Fame</span>
         </div>
         <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tighter uppercase mt-2 font-display break-words">
-          Arena Leaderboard
+          Arena Global Leaderboard
         </h1>
         <p className="text-xs sm:text-sm text-white/50 mt-2 max-w-2xl leading-relaxed">
-          Global competitive standings for Chess and 2048. Ranked by verified XP earned through competitive PvP and tournament match victories.
+          Shared real-time standings across all contenders on X Layer. Ranked by verified XP and competitive ratings synchronized across all players.
         </p>
       </div>
 
@@ -122,17 +159,17 @@ export const LeaderboardView: React.FC = () => {
                   : 'bg-black text-white/50 hover:text-white border border-white/10'
               }`}
             >
-              {t === 'chess' ? '♟️ Chess Grandmasters (XP)' : '⚡ 2048 Velocity Apex (XP)'}
+              {t === 'chess' ? '♟️ Chess Grandmasters' : '⚡ 2048 Velocity Apex'}
             </button>
           ))}
         </div>
 
         {/* Search Field */}
-        <div className="relative w-full sm:w-64">
+        <div className="relative w-full sm:w-72">
           <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search player or 0x..."
+            placeholder="Search contender or 0x..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-black border border-white/15 pl-9 pr-3 py-2 text-xs text-white placeholder-white/40 font-mono focus:outline-none focus:border-[#CCFF00]"
@@ -159,7 +196,7 @@ export const LeaderboardView: React.FC = () => {
                   {top3[1].username}
                 </h4>
                 {top3[1].isCurrentUser && (
-                  <span className="text-[9px] px-1.5 py-0.2 bg-[#CCFF00] text-black font-black font-mono">
+                  <span className="text-[9px] px-1.5 py-0.5 bg-[#CCFF00] text-black font-black font-mono">
                     YOU
                   </span>
                 )}
@@ -169,7 +206,8 @@ export const LeaderboardView: React.FC = () => {
               </span>
             </div>
             <div className="pt-2 border-t border-white/10 text-[10px] text-white/40 font-mono">
-              Win Rate: {top3[1].winRate}% • Tier: {top3[1].tier}
+              Win Rate: {tab === '2048' ? top3[1].winRate2048 : top3[1].chessWinRate}% • Tier:{' '}
+              {tab === '2048' ? top3[1].tier2048 : top3[1].chessTier}
             </div>
           </div>
 
@@ -189,7 +227,7 @@ export const LeaderboardView: React.FC = () => {
                   {top3[0].username}
                 </h4>
                 {top3[0].isCurrentUser && (
-                  <span className="text-[9px] px-1.5 py-0.2 bg-[#CCFF00] text-black font-black font-mono">
+                  <span className="text-[9px] px-1.5 py-0.5 bg-[#CCFF00] text-black font-black font-mono">
                     YOU
                   </span>
                 )}
@@ -199,7 +237,8 @@ export const LeaderboardView: React.FC = () => {
               </span>
             </div>
             <div className="pt-2 border-t border-white/10 text-xs text-white/80 font-mono font-bold">
-              ${top3[0].prizesWonUsdc.toLocaleString()} USDC Won • Tier: {top3[0].tier}
+              ${top3[0].prizesWonUsdc.toLocaleString()} USDC Won • Tier:{' '}
+              {tab === '2048' ? top3[0].tier2048 : top3[0].chessTier}
             </div>
           </div>
 
@@ -219,7 +258,7 @@ export const LeaderboardView: React.FC = () => {
                   {top3[2].username}
                 </h4>
                 {top3[2].isCurrentUser && (
-                  <span className="text-[9px] px-1.5 py-0.2 bg-[#CCFF00] text-black font-black font-mono">
+                  <span className="text-[9px] px-1.5 py-0.5 bg-[#CCFF00] text-black font-black font-mono">
                     YOU
                   </span>
                 )}
@@ -229,95 +268,132 @@ export const LeaderboardView: React.FC = () => {
               </span>
             </div>
             <div className="pt-2 border-t border-white/10 text-[10px] text-white/40 font-mono">
-              Win Rate: {top3[2].winRate}% • Tier: {top3[2].tier}
+              Win Rate: {tab === '2048' ? top3[2].winRate2048 : top3[2].chessWinRate}% • Tier:{' '}
+              {tab === '2048' ? top3[2].tier2048 : top3[2].chessTier}
             </div>
           </div>
         </div>
       )}
 
-      {/* Full Leaderboard Table */}
+      {/* Full Global Contenders Table */}
       <div className="border border-white/10 bg-[#0A0A0A] overflow-hidden shadow-xl min-w-0 max-w-full">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono min-w-[550px]">
+          <table className="w-full text-left text-xs font-mono min-w-[650px]">
             <thead className="bg-black border-b border-white/10 text-white/40 uppercase text-[10px]">
               <tr>
                 <th className="py-3.5 px-4">Rank</th>
                 <th className="py-3.5 px-4">Contender</th>
                 <th className="py-3.5 px-4">Tier</th>
-                <th className="py-3.5 px-4 text-right">Ranked XP</th>
+                <th className="py-3.5 px-4 text-right">Ranked Rating</th>
                 <th className="py-3.5 px-4 text-right">Win Rate</th>
+                <th className="py-3.5 px-4 text-right">
+                  {tab === 'chess' ? 'Matches Played' : 'Best Score'}
+                </th>
                 <th className="py-3.5 px-4 text-right">Prizes Won</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {filteredList.map((item, index) => {
-                const isYou = item.isCurrentUser || item.username === user.username;
+              {filteredList.map((entry, index) => {
+                const rankNum = index + 1;
+                const isYou = entry.isCurrentUser;
+                const shortAddr = entry.walletAddress
+                  ? `${entry.walletAddress.slice(0, 6)}...${entry.walletAddress.slice(-4)}`
+                  : '0x...';
+
                 return (
                   <tr
-                    key={item.userId || item.id || `lb_row_${index}`}
+                    key={entry.userId || entry.walletAddress || index}
                     className={`transition ${
                       isYou
-                        ? 'bg-[#CCFF00]/10 border-l-2 border-l-[#CCFF00] hover:bg-[#CCFF00]/15'
+                        ? 'bg-[#CCFF00]/10 border-l-4 border-l-[#CCFF00] hover:bg-[#CCFF00]/15'
                         : 'hover:bg-white/5'
                     }`}
                   >
-                    <td className="py-4 px-4 font-bold text-white">
-                      #{index + 1 < 10 ? `0${index + 1}` : index + 1}
+                    {/* Rank */}
+                    <td className="py-3.5 px-4 font-bold">
+                      <div className="flex items-center space-x-1.5">
+                        {rankNum === 1 && <Crown className="w-4 h-4 text-[#CCFF00]" />}
+                        {rankNum === 2 && <Medal className="w-4 h-4 text-slate-300" />}
+                        {rankNum === 3 && <Medal className="w-4 h-4 text-amber-600" />}
+                        <span
+                          className={`${
+                            rankNum <= 3 ? 'text-white font-black' : 'text-white/40'
+                          }`}
+                        >
+                          #{rankNum.toString().padStart(2, '0')}
+                        </span>
+                      </div>
                     </td>
-                    <td className="py-4 px-4">
+
+                    {/* Contender Name & Avatar */}
+                    <td className="py-3.5 px-4">
                       <div className="flex items-center space-x-3">
                         <img
-                          src={item.avatar}
-                          alt={item.username}
-                          className={`w-8 h-8 object-cover border shrink-0 ${
-                            isYou ? 'border-[#CCFF00]' : 'border-white/20'
-                          }`}
+                          src={entry.avatar}
+                          alt={entry.username}
+                          className="w-8 h-8 object-cover border border-white/20 bg-black shrink-0"
                         />
                         <div className="min-w-0">
                           <div className="flex items-center space-x-1.5">
-                            <span className={`font-bold text-xs truncate max-w-[120px] sm:max-w-[180px] ${
-                              isYou ? 'text-[#CCFF00]' : 'text-white'
-                            }`}>
-                              {item.username}
+                            <span
+                              className={`font-black uppercase tracking-tight truncate ${
+                                isYou ? 'text-[#CCFF00]' : 'text-white'
+                              }`}
+                            >
+                              {entry.username}
                             </span>
                             {isYou && (
                               <span className="text-[9px] px-1.5 py-0.2 bg-[#CCFF00] text-black font-black font-mono shrink-0">
                                 YOU
                               </span>
                             )}
-                            {item.walletAddress && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-white/10 text-white/70 border border-white/10 font-mono hidden sm:inline-block">
-                                {item.walletAddress}
-                              </span>
-                            )}
                           </div>
-                          <span className="text-[10px] text-white/40">
-                            {item.matchesPlayed} Matches Completed
+                          <span className="text-[10px] text-white/40 font-mono block truncate">
+                            {shortAddr}
                           </span>
                         </div>
                       </div>
                     </td>
-                    <td className="py-4 px-4">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 border ${
-                        isYou
-                          ? 'bg-[#CCFF00]/20 text-[#CCFF00] border-[#CCFF00]/40'
-                          : 'bg-white/10 text-white border-white/15'
-                      }`}>
-                        {item.tier}
+
+                    {/* Tier */}
+                    <td className="py-3.5 px-4">
+                      <span className="text-[11px] px-2 py-0.5 bg-white/10 text-white font-bold uppercase">
+                        {tab === 'chess' ? entry.chessTier : entry.tier2048}
                       </span>
                     </td>
-                    <td className="py-4 px-4 text-right font-bold text-[#CCFF00] text-sm">
-                      {tab === '2048' ? item.score2048Rating : item.chessRating} XP
+
+                    {/* Ranked Rating */}
+                    <td className="py-3.5 px-4 text-right font-black text-[#CCFF00] text-sm">
+                      {tab === 'chess' ? entry.chessRating : entry.score2048Rating} XP
                     </td>
-                    <td className="py-4 px-4 text-right text-white/80 font-bold">
-                      {item.winRate}%
+
+                    {/* Win Rate */}
+                    <td className="py-3.5 px-4 text-right text-white/80">
+                      {tab === 'chess' ? `${entry.chessWinRate}%` : `${entry.winRate2048}%`}
                     </td>
-                    <td className="py-4 px-4 text-right text-[#CCFF00] font-bold">
-                      ${item.prizesWonUsdc.toLocaleString()} USDC
+
+                    {/* Secondary stat */}
+                    <td className="py-3.5 px-4 text-right text-white/60">
+                      {tab === 'chess'
+                        ? `${entry.chessPlayed} games`
+                        : `${entry.bestScore2048.toLocaleString()} pts`}
+                    </td>
+
+                    {/* Prizes Won */}
+                    <td className="py-3.5 px-4 text-right font-bold text-white">
+                      ${entry.prizesWonUsdc.toLocaleString()} USDC
                     </td>
                   </tr>
                 );
               })}
+
+              {filteredList.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-white/40 font-mono">
+                    No contenders found matching "{searchQuery}".
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
