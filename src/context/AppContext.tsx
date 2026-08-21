@@ -34,6 +34,8 @@ import {
   fetchUserProfile,
   subscribeLeaderboard,
   updateLeaderboardScore,
+  generateRandomAvatar,
+  claimUsername,
 } from '../lib/firestoreService';
 
 export const OWNER_ADMIN_WALLET = '0xeDf63F61FfD9B8dABEb1179F3Cd4D2968C6003Be';
@@ -113,6 +115,7 @@ interface AppContextType {
   promptForfeit: (targetView: string | null, customCallback?: () => void) => void;
   confirmForfeitAndLeave: () => void;
   cancelForfeit: () => void;
+  updateUserIdentity: (newUsername: string, newAvatar: string, newBio?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -172,13 +175,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       user.walletAddress.trim().toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase()
   );
 
-  // Real-time Firestore synchronization for Events
+  // Real-time Firestore synchronization for Events (Admin creations/deletions reflect immediately)
   useEffect(() => {
     const unsubscribe = subscribeLiveEvents((liveEvents) => {
-      // If Firestore contains created events, use them seamlessly
-      if (liveEvents && liveEvents.length > 0) {
-        setEvents(liveEvents);
-      }
+      setEvents(liveEvents || []);
     });
     return () => unsubscribe();
   }, []);
@@ -195,11 +195,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time Firestore synchronization for User Match History
   useEffect(() => {
-    if (!user.walletAddress) return;
+    if (!user.walletAddress) {
+      setMatchHistory([]);
+      return;
+    }
     const unsubscribe = subscribeUserMatches(user.walletAddress, (records) => {
-      if (records && records.length > 0) {
-        setMatchHistory(records);
-      }
+      setMatchHistory(records || []);
     });
     return () => unsubscribe();
   }, [user.walletAddress]);
@@ -264,94 +265,131 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Safe Web3 Connection with MetaMask, OKX, WalletConnect & Owner Fast-Connect
   const connectWallet = async (walletName: string, customAddress?: string) => {
     try {
-      // 1. If explicit custom address provided
-      if (customAddress) {
-        const isOwner = customAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
-        let onChainOkb = isOwner ? 25.0 : 0.0;
-        let onChainUsdc = isOwner ? 1000.0 : 0.0;
+      let resolvedAddress = customAddress;
 
-        try {
-          const onChain = await fetchOnChainBalances(customAddress);
-          if (onChain.isLive) {
-            onChainOkb = onChain.okb;
-            onChainUsdc = onChain.usdc;
-          }
-        } catch (e) {
-          console.warn('Initial custom balance fetch', e);
+      if (!resolvedAddress) {
+        const providerType = walletName.toLowerCase().includes('okx')
+          ? 'okx'
+          : walletName.toLowerCase().includes('metamask')
+          ? 'metamask'
+          : 'any';
+        const realAddr = await connectInjectedWeb3Wallet(providerType);
+        if (realAddr) {
+          resolvedAddress = realAddr;
         }
-
-        // Try load existing Firestore profile
-        const existingProfile = await fetchUserProfile(customAddress);
-
-        setUser((prev) => ({
-          ...prev,
-          ...(existingProfile || {}),
-          walletAddress: customAddress,
-          isAdmin: isOwner,
-          username: existingProfile?.username || (isOwner ? 'X Arena Deployer (Admin)' : prev.username === 'Arena Contender' ? 'zkEVM Contender' : prev.username),
-          balanceOkb: onChainOkb > 0 ? onChainOkb : isOwner ? 25.0 : 0.0,
-          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : isOwner ? 1000.0 : 0.0,
-          globalRank: isOwner ? 1 : existingProfile?.globalRank || prev.globalRank || 84,
-        }));
-        setIsConnected(true);
-        setIsWalletModalOpen(false);
-        showToast(
-          isOwner
-            ? 'Contract Owner Verified! Admin Suite Enabled.'
-            : `Connected wallet ${customAddress.slice(0, 6)}...${customAddress.slice(-4)}`,
-          'success'
-        );
-        return;
       }
 
-      // 2. Real Browser Web3 Injected Provider Connection (OKX / MetaMask / Injected)
-      const providerType = walletName.toLowerCase().includes('okx')
-        ? 'okx'
-        : walletName.toLowerCase().includes('metamask')
-        ? 'metamask'
-        : 'any';
+      if (!resolvedAddress) {
+        throw new Error('No wallet address could be resolved.');
+      }
 
-      const realAddr = await connectInjectedWeb3Wallet(providerType);
-      if (realAddr) {
-        const isOwner = realAddr.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
-        const displayAddr = `${realAddr.slice(0, 6)}...${realAddr.slice(-4)}`;
+      const isOwner = resolvedAddress.toLowerCase() === OWNER_ADMIN_WALLET.toLowerCase();
+      const displayAddr = `${resolvedAddress.slice(0, 6)}...${resolvedAddress.slice(-4)}`;
 
-        let onChainOkb = 0;
-        let onChainUsdc = 0;
-        try {
-          const onChain = await fetchOnChainBalances(realAddr);
+      let onChainOkb = isOwner ? 25.0 : 0.0;
+      let onChainUsdc = isOwner ? 1000.0 : 0.0;
+
+      try {
+        const onChain = await fetchOnChainBalances(resolvedAddress);
+        if (onChain.isLive) {
           onChainOkb = onChain.okb;
           onChainUsdc = onChain.usdc;
-        } catch (e) {
-          console.log('Real balance fetch', e);
         }
-
-        // Load existing Firestore profile if previously registered
-        const existingProfile = await fetchUserProfile(realAddr);
-
-        setUser((prev) => ({
-          ...prev,
-          ...(existingProfile || {}),
-          walletAddress: realAddr,
-          isAdmin: isOwner,
-          balanceOkb: onChainOkb,
-          balanceUsdc: onChainUsdc,
-          globalRank: isOwner ? 1 : existingProfile?.globalRank || prev.globalRank || 42,
-        }));
-        setIsConnected(true);
-        setIsWalletModalOpen(false);
-        showToast(
-          isOwner
-            ? `Owner Wallet Verified: ${displayAddr} (Admin Enabled)`
-            : `Connected: ${displayAddr} on X Layer zkEVM!`,
-          'success'
-        );
-        return;
+      } catch (e) {
+        console.warn('On-chain balance fetch notice:', e);
       }
+
+      // Try load existing Firestore profile
+      const existingProfile = await fetchUserProfile(resolvedAddress);
+
+      if (existingProfile) {
+        const updated: UserProfile = {
+          ...existingProfile,
+          walletAddress: resolvedAddress,
+          isAdmin: isOwner,
+          balanceOkb: onChainOkb > 0 ? onChainOkb : (existingProfile.balanceOkb || (isOwner ? 25.0 : 0.0)),
+          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (existingProfile.balanceUsdc || (isOwner ? 1000.0 : 0.0)),
+        };
+        setUser(updated);
+        saveUserProfile(updated);
+      } else {
+        // Brand new contender joining: zero initial stats, fresh unique avatar
+        const randomAvatar = generateRandomAvatar(resolvedAddress);
+        const defaultUsername = isOwner ? 'X Arena Deployer (Admin)' : `Contender_${resolvedAddress.slice(2, 6)}`;
+        const freshUser: UserProfile = {
+          id: `usr_${resolvedAddress.toLowerCase()}`,
+          walletAddress: resolvedAddress,
+          username: defaultUsername,
+          avatar: randomAvatar,
+          title: isOwner ? 'Deployer & Arbiter' : 'Arena Contender',
+          bio: 'Competitive contender on X Layer zkEVM.',
+          joinedDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          balanceUsdc: onChainUsdc > 0 ? onChainUsdc : (isOwner ? 1000.0 : 0.0),
+          balanceOkb: onChainOkb > 0 ? onChainOkb : (isOwner ? 25.0 : 0.0),
+          totalPrizesWonUsdc: 0,
+          globalRank: isOwner ? 1 : 0,
+          chessRating: 1200,
+          chessPeakRating: 1200,
+          chessTier: 'Bronze',
+          chessStats: { wins: 0, losses: 0, draws: 0, streak: 0 },
+          score2048Rating: 1200,
+          score2048PeakRating: 1200,
+          bestScore2048: 0,
+          stats2048: { gamesPlayed: 0, wins2048: 0, highestTile: 0, streak: 0 },
+          achievements: [],
+          isCreator: false,
+          isAdmin: isOwner,
+        };
+        setUser(freshUser);
+        await saveUserProfile(freshUser);
+        await claimUsername(defaultUsername, undefined, resolvedAddress);
+      }
+
+      setIsConnected(true);
+      setIsWalletModalOpen(false);
+      showToast(
+        isOwner
+          ? `Owner Admin Verified: ${displayAddr}`
+          : `Connected: ${displayAddr} on X Layer zkEVM!`,
+        'success'
+      );
     } catch (err: any) {
       console.warn('Web3 connection notice:', err);
       showToast(err?.message || 'Wallet connection was cancelled or rejected.', 'error');
     }
+  };
+
+  // Custom Username & Avatar Updater with Firestore Reservation
+  const updateUserIdentity = async (
+    newUsername: string,
+    newAvatar: string,
+    newBio?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const trimmed = newUsername.trim();
+    if (trimmed.length < 3 || trimmed.length > 24) {
+      return { success: false, error: 'Username must be between 3 and 24 characters.' };
+    }
+
+    const claimRes = await claimUsername(trimmed, user.username, user.walletAddress);
+    if (!claimRes.success) {
+      return { success: false, error: claimRes.error || 'Username is already taken or unavailable.' };
+    }
+
+    const updatedUser: UserProfile = {
+      ...user,
+      username: trimmed,
+      avatar: newAvatar || user.avatar,
+      bio: newBio !== undefined ? newBio : user.bio,
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem('xarena_user', JSON.stringify(updatedUser));
+
+    if (user.walletAddress) {
+      await saveUserProfile(updatedUser);
+    }
+
+    return { success: true };
   };
 
   const disconnectWallet = () => {
@@ -809,6 +847,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         promptForfeit,
         confirmForfeitAndLeave,
         cancelForfeit,
+        updateUserIdentity,
       }}
     >
       {children}

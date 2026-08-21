@@ -45,14 +45,7 @@ export const HomeView: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const activeEvent = events[0] || {
-    id: 'evt_1',
-    title: 'Chess Grand Prix Invitational',
-    game: 'chess',
-    prizePoolUsdc: 2500,
-    entryFeeUsdc: 10,
-    status: 'live',
-  };
+  const featuredEvent = events && events.length > 0 ? (events.find((e) => e.featured) || events[0]) : null;
 
   return (
     <div className="space-y-12 pb-16">
@@ -327,46 +320,79 @@ export const HomeView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Featured Active Event Spotlight */}
-      <div className="border border-white/10 bg-[#0A0A0A] p-6 sm:p-8 lg:p-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6 sm:gap-8 shadow-xl">
-        <div className="space-y-3 max-w-2xl">
-          <div className="flex items-center space-x-2">
-            <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#CCFF00] text-black">
-              FEATURED TOURNAMENT
-            </span>
-            <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">
-              X Layer Smart Contract
-            </span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white font-display">
-            {activeEvent.title}
-          </h2>
-          <p className="text-xs sm:text-sm text-white/60 leading-relaxed">
-            Swiss format tournament open to all ranked players. Top contenders share the escrow pool deposited on X Layer testnet.
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 shrink-0">
-          <div className="bg-black border border-white/15 p-4 text-center sm:text-left">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-widest block font-mono">
-              Guaranteed Pool
-            </span>
-            <span className="text-xl sm:text-2xl font-black font-mono text-[#CCFF00]">
-              ${activeEvent.prizePoolUsdc.toLocaleString()} USDC
-            </span>
+      {/* 3. Featured Active Event Spotlight or Ranked Season Banner */}
+      {featuredEvent ? (
+        <div className="border border-white/10 bg-[#0A0A0A] p-6 sm:p-8 lg:p-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6 sm:gap-8 shadow-xl">
+          <div className="space-y-3 max-w-2xl">
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#CCFF00] text-black">
+                FEATURED TOURNAMENT
+              </span>
+              <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">
+                X Layer Smart Escrow
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white font-display">
+              {featuredEvent.title}
+            </h2>
+            <p className="text-xs sm:text-sm text-white/60 leading-relaxed">
+              {featuredEvent.description || 'Competitive tournament on X Layer. Register and claim verified on-chain prize distributions.'}
+            </p>
           </div>
 
-          <button
-            onClick={() => {
-              sound.playClick();
-              setCurrentView('events');
-            }}
-            className="px-6 sm:px-8 py-3.5 sm:py-4 bg-white hover:bg-[#CCFF00] text-black font-black text-xs uppercase tracking-tight transition text-center"
-          >
-            Register for Tournament &rarr;
-          </button>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 shrink-0">
+            <div className="bg-black border border-white/15 p-4 text-center sm:text-left">
+              <span className="text-[10px] text-white/40 uppercase font-bold tracking-widest block font-mono">
+                Guaranteed Pool
+              </span>
+              <span className="text-xl sm:text-2xl font-black font-mono text-[#CCFF00]">
+                ${(featuredEvent.prizePoolUsdc || 0).toLocaleString()} USDC
+              </span>
+            </div>
+
+            <button
+              onClick={() => {
+                sound.playClick();
+                setCurrentView('events');
+              }}
+              className="px-6 sm:px-8 py-3.5 sm:py-4 bg-white hover:bg-[#CCFF00] text-black font-black text-xs uppercase tracking-tight transition text-center"
+            >
+              Enter Tournament &rarr;
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="border border-white/10 bg-[#0A0A0A] p-6 sm:p-8 lg:p-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6 sm:gap-8 shadow-xl">
+          <div className="space-y-3 max-w-2xl">
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#CCFF00] text-black">
+                RANKED SEASON LIVE
+              </span>
+              <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">
+                Real-Time Elo & Tier Progression
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white font-display">
+              Compete on X Layer zkEVM
+            </h2>
+            <p className="text-xs sm:text-sm text-white/60 leading-relaxed">
+              Battle in rated Chess and 2048 matches to ascend the global leaderboards. All match statistics and ratings persist securely on-chain and to your verified profile.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 shrink-0">
+            <button
+              onClick={() => {
+                sound.playClick();
+                setCurrentView('ranked');
+              }}
+              className="px-6 sm:px-8 py-3.5 sm:py-4 bg-white hover:bg-[#CCFF00] text-black font-black text-xs uppercase tracking-tight transition text-center font-mono"
+            >
+              Enter Ranked Ladder &rarr;
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

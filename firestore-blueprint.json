@@ -7,6 +7,13 @@
         "description": "User profiles indexed by wallet address or auth ID"
       }
     },
+    "usernames": {
+      "$username": {
+        "read": "true",
+        "write": "true",
+        "description": "Unique username registry mapped to wallet addresses"
+      }
+    },
     "events": {
       "$eventId": {
         "read": "true",

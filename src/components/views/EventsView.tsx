@@ -28,6 +28,8 @@ export const EventsView: React.FC = () => {
     return evt.game === selectedTab;
   });
 
+  const totalEscrowVaultUsdc = events.reduce((sum, e) => sum + (e.prizePoolUsdc || 0), 0);
+
   const handleStartTournamentMatch = (evt: ArenaEvent) => {
     setActiveEventToPlay(evt);
     setSelectedGame(evt.game);
@@ -58,7 +60,9 @@ export const EventsView: React.FC = () => {
             <span className="text-[10px] text-white/40 uppercase font-mono font-bold block">
               Total Escrow Vault
             </span>
-            <span className="text-base font-black text-[#CCFF00] font-mono block">$19,500 USDC</span>
+            <span className="text-base font-black text-[#CCFF00] font-mono block">
+              ${totalEscrowVaultUsdc.toLocaleString()} USDC
+            </span>
           </div>
           <div className="w-2 h-2 rounded-full bg-[#CCFF00] animate-pulse" />
         </div>
